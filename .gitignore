@@ -1,0 +1,11 @@
+venv3110
+compressor_data
+*.csv
+*.pdf
+__pycache__
+.neptune
+*.zip
+lightning_logs
+data
+*.txt
+models
