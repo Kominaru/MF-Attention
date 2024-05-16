@@ -46,7 +46,7 @@ class LinkedAutoencoder(nn.Module):
 
         x6 = self.linear6(x5)
 
-        x6 = F.tanh(x6)
+        # x6 = F.tanh(x6)
 
         return x6
 

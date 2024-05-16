@@ -14,7 +14,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping
 import torch
 from dataset import DyadicRegressionDataModule, EmbeddingDataModule
-from model import CollaborativeFilteringModel, CrossAttentionMFModel, EmbeddingCompressor
+from model import CollaborativeFilteringModel, CrossAttentionMFModel, CollaborativeFilteringWithCompressingModel, AltCollaborativeFilteringModel
 from os import path
 from bayes_opt import BayesianOptimization
 import neptune
@@ -31,7 +31,7 @@ def train_MF(
     max_epochs=1000,
     batch_size=2**15,
     num_workers=4,
-    l2_reg=1e-5,  # 1e-4 for tripadvisor-london and ml-100k
+    l2_reg=5e-3,  # 1e-4 for tripadvisor-london and ml-100k
     learning_rate=1e-3,  # 5e-4 for ml-100k
     dropout=0.0,
     verbose=0,
@@ -83,6 +83,28 @@ def train_MF(
             rating_range=(data_module.min_rating, data_module.max_rating),
         )
 
+    elif MODEL == "Compressor":
+        model = CollaborativeFilteringWithCompressingModel(
+            data_module.num_users,
+            data_module.num_items,
+            embedding_dim=embedding_dim,
+            compressed_dims=64,
+            l2_reg=l2_reg,
+            lr=learning_rate,
+            rating_range=(data_module.min_rating, data_module.max_rating),
+        )
+
+    elif MODEL == "AltMF":
+
+        model = AltCollaborativeFilteringModel(
+            data_module.num_users,
+            data_module.num_items,
+            embedding_dim=embedding_dim,
+            l2_reg=l2_reg,
+            lr=learning_rate,
+            rating_range=(data_module.min_rating, data_module.max_rating),
+        )
+
     # # Checkpoint only the weights that give the best validation RMSE, overwriting existing checkpoints
     if path.exists("models/MF/checkpoints/best-model.ckpt"):
         os.remove("models/MF/checkpoints/best-model.ckpt")
@@ -115,7 +137,7 @@ def train_MF(
         callbacks=[checkpoint_callback],
         enable_model_summary=verbose,
         enable_progress_bar=verbose,
-        max_time="00:00:20:00"
+        max_time="00:00:10:00"
     )
 
     # print("training")
@@ -124,7 +146,14 @@ def train_MF(
     trainer.fit(model, data_module)
 
     # Load the best model
-    model = CollaborativeFilteringModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")
+    if MODEL == "MF":
+        model = CollaborativeFilteringModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")
+    elif MODEL == "CrossAttMF":
+        model = CrossAttentionMFModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")
+    elif MODEL == "Compressor":
+        model = CollaborativeFilteringWithCompressingModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")
+    elif MODEL == "AltMF":
+        model = AltCollaborativeFilteringModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")    
 
     predicts = trainer.predict(model, data_module.test_dataloader())
 

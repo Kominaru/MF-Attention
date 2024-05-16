@@ -366,3 +366,43 @@ class EmbeddingDataModule(LightningDataModule):
         return DataLoader(
             self.dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
         )
+    
+
+class DyadicRegressionDistilDataset(Dataset):
+    """
+    Represents a dataset for regression over dyadic data.
+    """
+
+    def __init__(self, df, user_embeds, item_embeds, user_bias, item_bias, global_bias):
+
+        self.data = df
+        self.data["user_id"] = self.data["user_id"].astype(np.int64)
+        self.data["item_id"] = self.data["item_id"].astype(np.int64)
+        self.data["rating"] = self.data["rating"].astype(np.float32)
+
+        self.user_embeds = user_embeds
+        self.item_embeds = item_embeds
+        self.user_bias = user_bias
+        self.item_bias = item_bias
+        self.global_bias = global_bias
+
+    def __len__(self):
+        """
+        Returns:
+            int: Length of the dataset
+        """
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        
+        user_id = self.data.at[idx, "user_id"]
+        item_id = self.data.at[idx, "item_id"]
+        rating = self.data.at[idx, "rating"]
+
+        user_embed = self.user_embeds[user_id]
+        item_embed = self.item_embeds[item_id]
+        user_bias = self.user_bias[user_id]
+        item_bias = self.item_bias[item_id]
+        global_bias = self.global_bias
+
+        return user_embed, item_embed, user_bias, item_bias, global_bias, rating
