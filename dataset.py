@@ -4,7 +4,63 @@ import pandas as pd
 from torch.utils.data import Dataset, DataLoader
 from pytorch_lightning import LightningDataModule
 import h5py
+import torch
 
+class FastTensorDataLoader:
+    """
+    A DataLoader-like object for a set of tensors that can be much faster than
+    TensorDataset + DataLoader because dataloader grabs individual indices of
+    the dataset and calls cat (slow).
+    """
+    def __init__(self, *tensors, batch_size=32, shuffle=False):
+        """
+        Initialize a FastTensorDataLoader.
+
+        :param *tensors: tensors to store. Must have the same length @ dim 0.
+        :param batch_size: batch size to load.
+        :param shuffle: if True, shuffle the data *in-place* whenever an
+            iterator is created out of this object.
+
+        :returns: A FastTensorDataLoader.
+        """
+        assert all(t.shape[0] == tensors[0].shape[0] for t in tensors)
+        self.tensors = tensors
+
+        self.dataset_len = self.tensors[0].shape[0]
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+
+        # Calculate # batches
+        n_batches, remainder = divmod(self.dataset_len, self.batch_size)
+        if remainder > 0:
+            n_batches += 1
+        self.n_batches = n_batches
+
+    def __iter__(self):
+        if self.shuffle:
+            self.indices = torch.randperm(self.dataset_len)
+        else:
+            self.indices = None
+        self.i = 0
+        return self
+
+    def __next__(self):
+        if self.i >= self.dataset_len:
+            raise StopIteration
+        if self.indices is not None:
+            indices = self.indices[self.i:self.i+self.batch_size]
+            batch = tuple(torch.index_select(t, 0, indices) for t in self.tensors)
+            if len(self.tensors) == 1:
+                batch = batch[0]
+        else:
+            batch = tuple(t[self.i:self.i+self.batch_size] for t in self.tensors)
+            if len(self.tensors) == 1:
+                batch = batch[0]
+        self.i += self.batch_size
+        return batch
+
+    def __len__(self):
+        return self.n_batches
 
 def load_and_format_tripadvisor_data(dataset_name):
     """
@@ -240,15 +296,6 @@ class DyadicRegressionDataModule(LightningDataModule):
             self.train_df = self.data[msk]
             self.test_df = self.data[~msk]
 
-        # if verbose: 
-        #     print(f"#Training samples: {len(self.train_df)}")
-        #     print(f"#Test samples    : {len(self.test_df)}")
-
-        #     train_tuples = self.train_df[["user_id", "item_id"]].apply(tuple, axis=1)
-        #     test_tuples = self.test_df[["user_id", "item_id"]].apply(tuple, axis=1)
-
-        #     print("#Repeated samples: ", test_tuples.isin(train_tuples).sum())
-
         # Calculate the number of users and items in the dataset
         self.num_users = self.data["user_id"].max() + 1
         self.num_items = self.data["item_id"].max() + 1
@@ -266,21 +313,6 @@ class DyadicRegressionDataModule(LightningDataModule):
             print(f"Min rating: {self.min_rating:.3f}")
             print(f"Max rating: {self.max_rating:.3f}")
 
-        # # Create array of size num_users to insert the average rating of each user
-        # self.avg_user_rating = np.zeros(self.num_users)
-        
-        # for i in np.unique(self.train_df["user_id"]):
-        #     self.avg_user_rating[i] = self.train_df[self.train_df["user_id"] == i]["rating"].mean()
-        
-        # # Create array of size num_items to insert the average rating of each item
-        # self.avg_item_rating = np.zeros(self.num_items)
-
-        # for i in np.unique(self.train_df["item_id"]):
-        #     self.avg_item_rating[i] = self.train_df[self.train_df["item_id"] == i]["rating"].mean()
-
-
-        # Reset index and create PyTorch datasets
-
         self.train_df = self.train_df.reset_index(drop=True)
         self.test_df = self.test_df.reset_index(drop=True)
 
@@ -288,32 +320,25 @@ class DyadicRegressionDataModule(LightningDataModule):
         self.test_dataset = DyadicRegressionDataset(self.test_df)
 
     def train_dataloader(self):
-        """
-        Returns:
-            torch.utils.data.DataLoader: DataLoader for the training set
-        """
-        return DataLoader(
-            self.train_dataset,
+        
+        return FastTensorDataLoader(
+            torch.tensor(self.train_df["user_id"].values),
+            torch.tensor(self.train_df["item_id"].values),
+            torch.tensor(self.train_df["rating"].values),
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=self.num_workers,
-            persistent_workers=True,
         )
 
     def val_dataloader(self):
-        """
-        Returns:
-            torch.utils.data.DataLoader: DataLoader for the validation set (same as test set)
-        """
-        return DataLoader(
-            self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
+        return FastTensorDataLoader(
+            torch.tensor(self.test_df["user_id"].values),
+            torch.tensor(self.test_df["item_id"].values),
+            torch.tensor(self.test_df["rating"].values),
+            batch_size=self.batch_size,
+            shuffle=False,
         )
 
     def test_dataloader(self):
-        """
-        Returns:
-            torch.utils.data.DataLoader: DataLoader for the test set
-        """
         return DataLoader(
             self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
         )
@@ -357,14 +382,14 @@ class EmbeddingDataModule(LightningDataModule):
         return DataLoader(
             self.dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
         )
-
+    
     def test_dataloader(self):
         """
         Returns:
             torch.utils.data.DataLoader: DataLoader for the test set
         """
         return DataLoader(
-            self.dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
+            self.dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
         )
     
 

@@ -1,53 +1,23 @@
+import logging
 import numpy as np
 import pandas as pd
 import torch
-from model import CollaborativeFilteringModel, EmbeddingCompressor
+from model import EmbeddingCompressor
+from models.collaborativefiltering_mf import CollaborativeFilteringModel
 from dataset import EmbeddingDataModule, DyadicRegressionDataset
 import pytorch_lightning as pl
-import matplotlib.pyplot as plt
+from bayes_opt import BayesianOptimization
 
-if __name__ == "__main__":
+logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
+logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
 
-    torch.autograd.set_detect_anomaly(True)
+ORIGIN_DIM = 32
+TARGET_DIM = 8
+MODE="tune"
 
-    train_data = pd.read_csv("compressor_data/_train.csv")
-    test_data = pd.read_csv("compressor_data/_test.csv")
+def compute_rmse(model, train_data, test_data):
 
-    model = CollaborativeFilteringModel.load_from_checkpoint(
-        "models/MF/checkpoints/best-model.ckpt"
-    )
-
-    user_embeddings = model.user_embedding.weight.detach().cpu().numpy()
-    item_embeddings = model.item_embedding.weight.detach().cpu().numpy()
-
-    # Create data modules for the compressors
-    user_data_module = EmbeddingDataModule(
-        user_embeddings, batch_size=256, num_workers=4
-    )
-
-    item_data_module = EmbeddingDataModule(
-        item_embeddings, batch_size=256, num_workers=4
-    )
-
-    # Train user compressor
-    user_compressor = EmbeddingCompressor(512, 64, lr=1e-4, l2_reg=1e-4)
-    trainer = pl.Trainer(
-        accelerator="auto", enable_progress_bar=True, max_time="00:00:20:00"
-    )
-
-    trainer.fit(user_compressor, user_data_module)
-    compressed_user_embeddings = np.concatenate(
-        trainer.predict(user_compressor, dataloaders=user_data_module.test_dataloader())
-    )
-
-    item_compressor = EmbeddingCompressor(512, 64, lr=1e-4, l2_reg=1e-4)
-    trainer = pl.Trainer(
-        accelerator="auto", enable_progress_bar=True, max_time="00:00:20:00"
-    )
-    trainer.fit(item_compressor, item_data_module)
-    compressed_item_embeddings = np.concatenate(
-        trainer.predict(item_compressor, dataloaders=item_data_module.test_dataloader())
-    )
+    trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
 
     train_dataloader = torch.utils.data.DataLoader(
         DyadicRegressionDataset(train_data), batch_size=2**14, shuffle=False, num_workers=4, persistent_workers=True
@@ -56,135 +26,138 @@ if __name__ == "__main__":
         DyadicRegressionDataset(test_data), batch_size=2**14, shuffle=False, num_workers=4, persistent_workers=True
     )
 
-    # Compute the MSE of the obtained compressed embeddings compared to the original embeddings
-    user_errors = (user_embeddings - compressed_user_embeddings).flatten()
-    item_errors = (item_embeddings - compressed_item_embeddings).flatten()
+    train_preds = np.concatenate(
+        trainer.predict(model, dataloaders=train_dataloader)
+    )
+    test_preds = np.concatenate(
+        trainer.predict(model, dataloaders=test_dataloader)
+    )
 
-    # Plot a histogram of the errors
+    train_rmse = np.sqrt(np.mean((train_preds - train_data["rating"].values) ** 2))
+    test_rmse = np.sqrt(np.mean((test_preds - test_data["rating"].values) ** 2))
 
-    bins = np.linspace(0, 1, 25)*0.5
+    print(f"\tTrain RMSE: {train_rmse}")
+    print(f"\tTest RMSE: {test_rmse}")
 
-    plt.hist(abs(user_errors), bins=bins, alpha=0.5, label="User Embeddings")
-    plt.hist(abs(item_errors), bins=bins, alpha=0.5, label="Item Embeddings")
+def train_compressor(
+        embeddings = None,
+        origin_dim= None,
+        target_dim= None,
+        lr=1e-4,
+        l2_reg=1e-4,
+        is_tuning=False
+):
 
-    plt.yscale("log")
+    data_module = EmbeddingDataModule(embeddings, batch_size=256, num_workers=4)
 
-    plt.legend()
-    plt.xlim(0, .5)
-    plt.xlabel("Mean Absolute Error")
-    plt.ylabel("Frequency")
+    compressor = EmbeddingCompressor(origin_dim, target_dim, lr=lr, l2_reg=l2_reg)
 
-    plt.tight_layout()
+    trainer = pl.Trainer(
+        gpus=1, enable_progress_bar=not is_tuning, max_time="00:03:00:00", enable_checkpointing=False, logger=False, enable_model_summary=False
+    )
 
-    plt.savefig("compressor_data/compression_errors.pdf")
-    plt.clf()
-    plt.cla()
+    trainer.fit(compressor, data_module)
 
-    user_mse = np.mean(abs(user_errors))
-    item_mse = np.mean(abs(item_errors))
+    compressed_embeddings = np.concatenate(
+        trainer.predict(compressor, dataloaders=data_module.test_dataloader())
+    )
 
-    print(f"User MSE: {user_mse}")
-    print(f"Item MSE: {item_mse}")
+    if is_tuning:
+        return -compressor.last_val_loss
+    else:
+        return compressed_embeddings
 
-    # Hist plot the values of the original and compressed embeddings
 
-    bins = np.linspace(-2, 2, 50)
+if __name__ == "__main__":
 
-    plt.hist(user_embeddings.flatten(), bins=bins, alpha=0.5, label="User Embeddings")
-    plt.hist(compressed_user_embeddings.flatten(), bins=bins, alpha=0.5, label="Compressed User Embeddings")
+    model_original = CollaborativeFilteringModel.load_from_checkpoint(
+        f"models/MF/checkpoints/best-model-{ORIGIN_DIM}.ckpt"
+    )
 
-    plt.legend()
-    plt.xlabel("Value")
-    plt.ylabel("Frequency")
-    plt.yscale("log")
-    plt.xlim(-2, 2)
-    plt.tight_layout()
+    model_target = CollaborativeFilteringModel.load_from_checkpoint(
+        f"models/MF/checkpoints/best-model-{TARGET_DIM}.ckpt"
+    )
 
-    plt.savefig("compressor_data/user_embeddings.pdf")
+    user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy()
+    item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy()
 
-    plt.clf()
-    plt.cla()
+    # Tune the compressor to find the best hyperparameters
+    if MODE == "tune" and False:
+        pbounds = {
+            "l2_reg": (-6, -2),
+            "lr": (-4.5, -3),
+        }
 
-    plt.hist(item_embeddings.flatten(), bins=bins, alpha=0.5, label="Item Embeddings")
-    plt.hist(compressed_item_embeddings.flatten(), bins=bins, alpha=0.5, label="Compressed Item Embeddings")
+        def train_compressor_tune(l2_reg, lr):
+            return train_compressor(
+                embeddings=user_embeddings,
+                lr=10 ** lr,
+                l2_reg=10 ** l2_reg,
+                is_tuning=True,
+            )
 
-    plt.legend()
-    plt.xlabel("Value")
-    plt.ylabel("Frequency")
-    plt.xlim(-2, 2)
-    plt.yscale("log")
-    plt.tight_layout()
+        optimizer = BayesianOptimization(
+            f=train_compressor_tune,
+            pbounds=pbounds,
 
-    plt.savefig("compressor_data/item_embeddings.pdf")
+        )
 
-    # Plot the maximum absolute error per each embedding
+        optimizer.maximize(init_points=5, n_iter=5)
 
-    user_max_errors = np.max(abs(user_errors).reshape(user_embeddings.shape), axis=1)
-    item_max_errors = np.max(abs(item_errors).reshape(item_embeddings.shape), axis=1)
+        print(optimizer.max)
 
-    bins = np.linspace(0, 1, 25)
+        l2_reg = 10 ** optimizer.max["params"]["l2_reg"]
+        lr = 10 ** optimizer.max["params"]["lr"]
 
-    plt.hist(user_max_errors, bins=bins, alpha=0.5, label="User Embeddings")
-    plt.hist(item_max_errors, bins=bins, alpha=0.5, label="Item Embeddings")
+    compressed_user_embeddings = train_compressor(user_embeddings, ORIGIN_DIM, TARGET_DIM, 1e-4, 0)
 
-    plt.xlim(0, 1)
-    plt.yscale("log")
+    if MODE == "tune" and False:
+        pbounds = {
+            "l2_reg": (-6, -2),
+            "lr": (-4.5, -3),
+        }
 
-    plt.legend()
-    plt.xlabel("Max Absolute Error")
-    plt.ylabel("Frequency")
+        def train_compressor_tune(l2_reg, lr):
+            return train_compressor(
+                embeddings=item_embeddings,
+                lr=10 ** lr,
+                l2_reg=10 ** l2_reg,
+                is_tuning=True,
+            )
 
-    plt.tight_layout()
+        optimizer = BayesianOptimization(
+            f=train_compressor_tune,
+            pbounds=pbounds,
 
-    plt.savefig("compressor_data/max_errors.pdf")
+        )
 
+        optimizer.maximize(init_points=5, n_iter=5)
+
+        print(optimizer.max)
+
+        l2_reg = optimizer.max["params"]["l2_reg"]
+        lr = optimizer.max["params"]["lr"]
+
+    compressed_item_embeddings = train_compressor(item_embeddings, ORIGIN_DIM, TARGET_DIM, 1e-4, 0)
+
+    train_data_og = pd.read_csv(f"compressor_data/_train_{ORIGIN_DIM}.csv")
+    test_data_og = pd.read_csv(f"compressor_data/_test_{ORIGIN_DIM}.csv")
+
+    train_data_tg = pd.read_csv(f"compressor_data/_train_{TARGET_DIM}.csv")
+    test_data_tg = pd.read_csv(f"compressor_data/_test_{TARGET_DIM}.csv")
 
     #############################
     # 1. ORIGINAL EMBEDDINGS
     #############################
 
-    train_preds = np.concatenate(
-        trainer.predict(model, dataloaders=train_dataloader), axis=0
-    )
-    test_preds = np.concatenate(
-        trainer.predict(model, dataloaders=test_dataloader), axis=0
-    )
+    # Get the RSME of the original embeddings (in the original and target dims)
 
-    train_rmse = np.sqrt(np.mean((train_preds - train_data["rating"].values) ** 2))
-    test_rmse = np.sqrt(np.mean((test_preds - test_data["rating"].values) ** 2))
+    
+    print(f"Original Embeddings (dim={ORIGIN_DIM})")
+    compute_rmse(model_original, train_data_og, test_data_og)
 
-    print("Original Embeddings")
-    print(f"\tTrain RMSE: {train_rmse}")
-    print(f"\tTest RMSE: {test_rmse}")
-
-    #############################
-    # 2. NOISY EMBEDDINGS
-    #############################
-
-    user_errors = np.random.permutation(user_errors)
-    item_errors = np.random.permutation(item_errors)
-
-    noisy_user_embeddings = user_embeddings + user_errors.reshape(user_embeddings.shape)
-    noisy_item_embeddings = item_embeddings + item_errors.reshape(item_embeddings.shape)
-
-    model.user_embedding.weight.data = torch.tensor(noisy_user_embeddings).to(
-        model.device
-    )
-    model.item_embedding.weight.data = torch.tensor(noisy_item_embeddings).to(
-        model.device
-    )
-
-    trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False)
-
-    train_preds = np.concatenate(trainer.predict(model, train_dataloader), axis=0)
-    test_preds = np.concatenate(trainer.predict(model, test_dataloader), axis=0)
-
-    train_rmse = np.sqrt(np.mean((train_preds - train_data["rating"].values) ** 2))
-    test_rmse = np.sqrt(np.mean((test_preds - test_data["rating"].values) ** 2))
-
-    print("Noisy Embeddings")
-    print(f"\tTrain RMSE: {train_rmse}")
-    print(f"\tTest RMSE: {test_rmse}")
+    print(f"Original Embeddings (dim={TARGET_DIM})")
+    compute_rmse(model_target, train_data_tg, test_data_tg)
 
     #############################
     # 3. COMPRESSED EMBEDDINGS
@@ -194,21 +167,12 @@ if __name__ == "__main__":
     assert compressed_user_embeddings.shape == user_embeddings.shape
     assert compressed_item_embeddings.shape == item_embeddings.shape
 
-    model.user_embedding.weight.data = torch.tensor(compressed_user_embeddings).to(
-        model.device
+    model_original.user_embedding.weight.data = torch.tensor(compressed_user_embeddings).to(
+        model_original.device
     )
-    model.item_embedding.weight.data = torch.tensor(compressed_item_embeddings).to(
-        model.device
+    model_original.item_embedding.weight.data = torch.tensor(compressed_item_embeddings).to(
+        model_original.device
     )
 
-    trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False)
-    
-    train_preds = np.concatenate(trainer.predict(model, train_dataloader), axis=0)
-    test_preds = np.concatenate(trainer.predict(model, test_dataloader), axis=0)
-
-    train_rmse = np.sqrt(np.mean((train_preds - train_data["rating"].values) ** 2))
-    test_rmse = np.sqrt(np.mean((test_preds - test_data["rating"].values) ** 2))
-
-    print("Compressed Embeddings")
-    print(f"\tTrain RMSE: {train_rmse}")
-    print(f"\tTest RMSE: {test_rmse}")
+    print(f"Compressed Embeddings (dim={ORIGIN_DIM} -> {TARGET_DIM})")
+    compute_rmse(model_original, train_data_og, test_data_og)

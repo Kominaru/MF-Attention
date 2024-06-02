@@ -1,53 +1,47 @@
 import os
-
-# Disable pytorch lightning warnings
-
 import numpy as np
-import pandas as pd
-import logging
-
-import torch.utils
-import torch.utils.data
-
-logging.getLogger("lightning").setLevel(0)
 import pytorch_lightning as pl
-from pytorch_lightning.callbacks import EarlyStopping
-import torch
-from dataset import DyadicRegressionDataModule, EmbeddingDataModule
-from model import CollaborativeFilteringModel, CrossAttentionMFModel, CollaborativeFilteringWithCompressingModel, AltCollaborativeFilteringModel
 from os import path
 from bayes_opt import BayesianOptimization
-import neptune
+import torch
+from models.collaborativefiltering_mf import CollaborativeFilteringModel
+from dataset import DyadicRegressionDataModule
 
-MODEL = "MF"
-NEPTUNE_PROJECT = "JorgePRuza-Tesis/MF-Attention"
-API_KEY = "eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiI3MDE0YzVjYi1hODRmLTQ4M2YtYTA0NC1mYzNjNDc5YTRlOGQifQ=="
+import logging
 
-# Needs to be in a function for PyTorch Lightning workers to work properly in Windows systems
+logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
+logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
+
+DATA_DIR = "data"
+MODE = "train"
+
+saved_datamodule = None
+
+USE_BIASES = False
+ACTIVATION = "sigmoid"
+SIGMOID_SCALE = 1.0
+EMBEDDING_DIM = 512
+
 def train_MF(
     dataset_name="ml-10m",
-    embedding_dim=512,  # 128 for tripadvisor-london and ml-100k, 8 for douban-monti, 512 for the rest
+    embedding_dim=EMBEDDING_DIM,  
     data_dir="data",
-    max_epochs=1000,
     batch_size=2**15,
     num_workers=4,
-    l2_reg=5e-3,  # 1e-4 for tripadvisor-london and ml-100k
-    learning_rate=1e-3,  # 5e-4 for ml-100k
-    dropout=0.0,
+    l2_reg=1e-2,
+    learning_rate=5e-4,
     verbose=0,
-    tune=False,
+    use_biases=USE_BIASES,
+    activation=ACTIVATION,
+    is_tuning=False,
+    sigmoid_scale=SIGMOID_SCALE,
 ):
-    """
-    Trains a collaborative filtering model for regression over a dyadic dataset .
-    """
-
-
-
-    # if tune:
-    #     l2_reg = 10**l2_reg
-    #     learning_rate = 10**learning_rate
-    #     embedding_dim = int(2**embedding_dim)
-
+    
+    if is_tuning:
+        verbose = 0
+        l2_reg = 10 ** l2_reg
+        learning_rate = 10 ** learning_rate
+    
     # Load the dyadic dataset using the data module
     data_module = DyadicRegressionDataModule(
         data_dir,
@@ -56,141 +50,95 @@ def train_MF(
         test_size=0.1,
         dataset_name=dataset_name,
         verbose=verbose,
+    ) if saved_datamodule is None else saved_datamodule
+
+    model = CollaborativeFilteringModel(
+        num_users=data_module.num_users,
+        num_items=data_module.num_items,
+        embedding_dim=embedding_dim,
+        lr=learning_rate,
+        l2_reg=l2_reg,
+        rating_range= (data_module.min_rating, data_module.max_rating),
+        use_biases=use_biases,
+        activation=activation,
+        sigmoid_scale=sigmoid_scale,
     )
 
-    print("data loaded")
+    if path.exists(f"models/MF/checkpoints/best-model-{EMBEDDING_DIM}.ckpt"):
+        os.remove(f"models/MF/checkpoints/best-model-{EMBEDDING_DIM}.ckpt")
 
-    # Initialize the collaborative filtering model
-    if MODEL == "MF":
-        model = CollaborativeFilteringModel(
-            data_module.num_users,
-            data_module.num_items,
-            embedding_dim=embedding_dim,
-            l2_reg=l2_reg,
-            lr=learning_rate,
-            dropout=dropout,
-            rating_range=(data_module.min_rating, data_module.max_rating),
+    callbacks = []
+
+    if not is_tuning:
+        checkpoint_callback = pl.callbacks.ModelCheckpoint(
+            dirpath="models/MF/checkpoints",
+            filename=f"best-model-{EMBEDDING_DIM}",
+            monitor="val_rmse",
+            mode="min",
         )
-    elif MODEL == "CrossAttMF":
-        model = CrossAttentionMFModel(
-            data_module.num_users,
-            data_module.num_items,
-            usr_avg=data_module.avg_user_rating,
-            item_avg=data_module.avg_item_rating,
-            embedding_dim=embedding_dim,
-            l2_reg=l2_reg,
-            lr=learning_rate,
-            rating_range=(data_module.min_rating, data_module.max_rating),
-        )
+        callbacks.append(checkpoint_callback)
 
-    elif MODEL == "Compressor":
-        model = CollaborativeFilteringWithCompressingModel(
-            data_module.num_users,
-            data_module.num_items,
-            embedding_dim=embedding_dim,
-            compressed_dims=64,
-            l2_reg=l2_reg,
-            lr=learning_rate,
-            rating_range=(data_module.min_rating, data_module.max_rating),
-        )
-
-    elif MODEL == "AltMF":
-
-        model = AltCollaborativeFilteringModel(
-            data_module.num_users,
-            data_module.num_items,
-            embedding_dim=embedding_dim,
-            l2_reg=l2_reg,
-            lr=learning_rate,
-            rating_range=(data_module.min_rating, data_module.max_rating),
-        )
-
-    # # Checkpoint only the weights that give the best validation RMSE, overwriting existing checkpoints
-    if path.exists("models/MF/checkpoints/best-model.ckpt"):
-        os.remove("models/MF/checkpoints/best-model.ckpt")
-
-    # Add Neptune logger
-    # neptune_logger = pl.loggers.NeptuneLogger(
-    #     api_key=API_KEY,
-    #     project=NEPTUNE_PROJECT,
-    #     log_model_checkpoints=False,
-    # )
-
-    # neptune_logger.experiment["parameters/embedding_dim"] = embedding_dim
-    # neptune_logger.experiment["parameters/l2_reg"] = l2_reg
-    # neptune_logger.experiment["parameters/learning_rate"] = learning_rate
-    # neptune_logger.experiment["parameters/model"] = MODEL
-    # neptune_logger.experiment["parameters/dataset"] = dataset_name
-
-    # Checkpoint to local the best model
-    checkpoint_callback = pl.callbacks.ModelCheckpoint(
-        dirpath="models/MF/checkpoints",
-        filename="best-model",
+    earlystopping_callback = pl.callbacks.EarlyStopping(
         monitor="val_rmse",
         mode="min",
+        patience=5,
+        verbose=False,
+        min_delta=0.0001,
     )
 
-    # # Initialize the trainer
+    callbacks.append(earlystopping_callback)
+
     trainer = pl.Trainer(
-        accelerator="auto",
-        # logger=neptune_logger,  # Add Neptune logger
-        callbacks=[checkpoint_callback],
+        gpus=1,
+        enable_checkpointing=not is_tuning,
+        callbacks=callbacks,
+        logger=False,
+        precision=16,
         enable_model_summary=verbose,
         enable_progress_bar=verbose,
-        max_time="00:00:10:00"
+        max_epochs=50
     )
 
-    # print("training")
-
-    # # Train the model
     trainer.fit(model, data_module)
 
-    # Load the best model
-    if MODEL == "MF":
-        model = CollaborativeFilteringModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")
-    elif MODEL == "CrossAttMF":
-        model = CrossAttentionMFModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")
-    elif MODEL == "Compressor":
-        model = CollaborativeFilteringWithCompressingModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")
-    elif MODEL == "AltMF":
-        model = AltCollaborativeFilteringModel.load_from_checkpoint("models/MF/checkpoints/best-model.ckpt")    
+    if not is_tuning:
 
-    predicts = trainer.predict(model, data_module.test_dataloader())
+        model = CollaborativeFilteringModel.load_from_checkpoint(f"models/MF/checkpoints/best-model-{EMBEDDING_DIM}.ckpt")
 
-    predicts = np.concatenate(predicts, axis=0)
+        predicts = trainer.predict(model, data_module.test_dataloader())
+        predicts = np.concatenate(predicts, axis=0)
 
-    # Compute the RMSE
-    rmse = np.sqrt(np.mean((predicts - data_module.test_df["rating"].values) ** 2))
-    print(f"Test RMSE: {rmse}")
+        rmse = np.sqrt(np.mean((predicts - data_module.test_df["rating"].values) ** 2))
+        
+        if verbose: print(f"Test RMSE: {rmse:.3}")
 
-    # Save the train and test partitions as CSV files
+    if not is_tuning:
+        os.makedirs("compressor_data", exist_ok=True)
+        data_module.train_df.to_csv(f"compressor_data/_train_{EMBEDDING_DIM}.csv", index=False)
+        data_module.test_df.to_csv(f"compressor_data/_test_{EMBEDDING_DIM}.csv", index=False)    
 
-    os.makedirs("compressor_data", exist_ok=True)
-
-    data_module.train_df.to_csv(f"compressor_data/_train.csv", index=False)
-    data_module.test_df.to_csv(f"compressor_data/_test.csv", index=False)    
+    if is_tuning:
+        return -model.min_val_loss
+    else:
+        return -rmse
 
 
 if __name__ == "__main__":
-    MODE = "train"
+    
 
     if MODE == "train":
         train_MF(verbose=1)
 
     elif MODE == "tune":
 
-        # Bayesian optimization
-
-        # Bounded region of parameter space
         pbounds = {
-            "embedding_dim": (2, 6),  # 8 to 1024
-            "l2_reg": (-6, -2),  # 1e-6 to 1e-2
-            "learning_rate": (-5, -3),  # 1e-5 to 1e-2
+            "l2_reg": (-6,-2),  
+            "learning_rate": (-4, -3), 
         }
 
-        def train_MF_tune(embedding_dim, l2_reg, learning_rate):
+        def train_MF_tune(l2_reg, learning_rate):
             return train_MF(
-                embedding_dim=embedding_dim, l2_reg=l2_reg, learning_rate=learning_rate, tune=True, save_outputs=False
+                l2_reg=l2_reg, learning_rate=learning_rate, is_tuning=True
             )
 
         optimizer = BayesianOptimization(
@@ -198,6 +146,6 @@ if __name__ == "__main__":
             pbounds=pbounds,
         )
 
-        optimizer.maximize(init_points=10, n_iter=30)
+        optimizer.maximize(init_points=5, n_iter=10)
 
         print(optimizer.max)
