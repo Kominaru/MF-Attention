@@ -25,6 +25,8 @@ class EmbeddingCompressor(LightningModule):
         self.decoder = LinkedAutoencoder(d)
         self.last_val_loss = float("inf")
 
+        self.val_outputs = []
+
     def _forward(self, x):
         # Make sure the input is a tensor
         if not torch.is_tensor(x):
@@ -61,6 +63,9 @@ class EmbeddingCompressor(LightningModule):
         x_hat = self(x)
         loss = nn.MSELoss()(x_hat, x)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        if self.current_epoch%25 == 0:
+            self.val_outputs.append(x_hat)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):
         x = batch

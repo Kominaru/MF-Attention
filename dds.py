@@ -5,7 +5,7 @@ import math
 import random
 from torch.nn import functional as F
 
-limit_a, limit_b, epsilon = -.0, 1.1, 1e-6
+limit_a, limit_b, epsilon = -.0, 1, 1e-6
 
 class DynamicDataSelectionHard2(nn.Module):
     """Implementation of L0 regularization for the input units of a fully connected layer"""
