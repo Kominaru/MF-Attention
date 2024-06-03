@@ -1,7 +1,7 @@
 import logging
 import os
 import numpy as np
-from models.collaborativefiltering_mf import CollaborativeFilteringModel
+from collaborativefiltering_mf import CollaborativeFilteringModel
 import pandas as pd
 from dataset import FastTensorDataLoader, DyadicRegressionDataset, DyadicRegressionDataModule
 from torch.utils.data import DataLoader

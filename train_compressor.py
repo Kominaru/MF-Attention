@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import torch
 from model import EmbeddingCompressor
-from models.collaborativefiltering_mf import CollaborativeFilteringModel
+from collaborativefiltering_mf import CollaborativeFilteringModel
 from dataset import EmbeddingDataModule, DyadicRegressionDataset
 import pytorch_lightning as pl
 from bayes_opt import BayesianOptimization
