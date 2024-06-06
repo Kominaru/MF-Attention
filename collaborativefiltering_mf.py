@@ -44,7 +44,6 @@ class CollaborativeFilteringModel(LightningModule):
             torch.nn.init.zeros_(self.item_bias.weight)
 
         self.train_rmse = MeanSquaredError(squared=False)
-        self.val_rmse = MeanSquaredError(squared=False)
 
         self.min_val_loss = float("inf")
 
@@ -92,7 +91,7 @@ class CollaborativeFilteringModel(LightningModule):
 
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=None):
         user_ids, item_ids, ratings = batch
         rating_pred = self(user_ids, item_ids)
 
@@ -101,8 +100,11 @@ class CollaborativeFilteringModel(LightningModule):
 
         rating_pred_clamped = self._clamp_ratings(rating_pred)
 
-        self.val_rmse.update(rating_pred_clamped, ratings)
-        self.log("val_rmse", self.val_rmse, on_step=False, on_epoch=True, prog_bar=True)
+        rmse = torch.sqrt(torch.nn.MSELoss()(rating_pred_clamped, ratings))
+        self.log("val_rmse", rmse, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
+        self.log("val_rmse", rmse, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=True)
+
+        
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):
         user_ids, item_ids, _ = batch

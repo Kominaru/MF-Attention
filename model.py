@@ -58,11 +58,13 @@ class EmbeddingCompressor(LightningModule):
 
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx , dataloader_idx=None):
         x = batch
         x_hat = self(x)
         loss = nn.MSELoss()(x_hat, x)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=True)
+        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
 
         if self.current_epoch%25 == 0:
             self.val_outputs.append(x_hat)

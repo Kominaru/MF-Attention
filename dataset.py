@@ -345,7 +345,7 @@ class DyadicRegressionDataModule(LightningDataModule):
     
 
 class EmbeddingDataModule(LightningDataModule):
-    def __init__(self, embeddings, batch_size=64, num_workers=0):
+    def __init__(self, embeddings, ids, batch_size=64, num_workers=0):
         """
         Creates a datamodule for embedding compression and reconstruction.
 
@@ -358,8 +358,19 @@ class EmbeddingDataModule(LightningDataModule):
         self.embeddings = embeddings
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.ids = ids
 
-        self.dataset = EmbeddingDataset(self.embeddings)
+
+        self.val_percentage = 0
+
+        self.dataset_train = EmbeddingDataset(self.embeddings[:ids.shape[0]-int(ids.shape[0]*self.val_percentage)])
+
+        self.dataset_known = EmbeddingDataset(self.embeddings[:ids.shape[0]-int(ids.shape[0]*self.val_percentage)])
+        self.dataset_unknown = EmbeddingDataset(self.embeddings[ids.shape[0]-int(ids.shape[0]*self.val_percentage):])
+
+        print(f"Total embeddings: {len(self.embeddings)}")
+        print(f"Known embeddings: {len(self.dataset_known)}")
+        print(f"Unknown embeddings: {len(self.dataset_unknown)}")
 
     def train_dataloader(self):
         """
@@ -367,31 +378,31 @@ class EmbeddingDataModule(LightningDataModule):
             torch.utils.data.DataLoader: DataLoader for the training set
         """
         return DataLoader(
-            self.dataset,
+            self.dataset_train,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
             persistent_workers=True,
-        )
+        ) 
 
     def val_dataloader(self):
         """
         Returns:
             torch.utils.data.DataLoader: DataLoader for the validation set (same as test set)
         """
-        return DataLoader(
-            self.dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
+
+        dataloader_known = DataLoader(
+            self.dataset_known, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
         )
-    
-    def test_dataloader(self):
-        """
-        Returns:
-            torch.utils.data.DataLoader: DataLoader for the test set
-        """
-        return DataLoader(
-            self.dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
-        )
-    
+
+        if len(self.dataset_unknown) > 0:
+            dataloader_unknown = DataLoader(
+                self.dataset_unknown, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+            )
+
+            return dataloader_known, dataloader_unknown
+        
+        return dataloader_known
 
 class DyadicRegressionDistilDataset(Dataset):
     """
