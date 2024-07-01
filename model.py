@@ -30,7 +30,10 @@ class EmbeddingCompressor(LightningModule):
     def _forward(self, x):
         # Make sure the input is a tensor
         if not torch.is_tensor(x):
-            x = torch.tensor(x, dtype=torch.float32)
+            try:
+                x = torch.tensor(x, dtype=torch.float32)
+            except:
+                print(x)
         x = self.encoder(x)
         x_att, mask = self.dynamic_data_selection(x)
         x = x * x_att * mask  # Self attention
@@ -52,9 +55,13 @@ class EmbeddingCompressor(LightningModule):
 
     def training_step(self, batch, batch_idx):
         x = batch
+
+        # Experiment (17/06/24): Add random gaussian noise to the input for regularization
+        # x = x + torch.randn_like(x) * 0.3
+
         x_hat, l2_reg = self._forward(x)
         loss = nn.MSELoss()(x_hat, x) + l2_reg
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
 
         return loss
 
@@ -66,7 +73,7 @@ class EmbeddingCompressor(LightningModule):
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=True)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
 
-        if self.current_epoch%25 == 0:
+        if (self.current_epoch < 500 and self.current_epoch % 50 == 0) or (self.current_epoch >= 500 and self.current_epoch % 250 == 0):
             self.val_outputs.append(x_hat)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):

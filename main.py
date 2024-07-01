@@ -9,8 +9,8 @@ from dataset import DyadicRegressionDataModule
 
 import logging
 
-logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
-logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
+# logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
+# logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
 
 DATA_DIR = "data"
 MODE = "train"
@@ -23,7 +23,7 @@ SIGMOID_SCALE = 1.0
 EMBEDDING_DIM = 512
 
 def train_MF(
-    dataset_name="ml-10m",
+    dataset_name="netflix-prize",
     embedding_dim=EMBEDDING_DIM,  
     data_dir="data",
     batch_size=2**15,
@@ -64,14 +64,14 @@ def train_MF(
         sigmoid_scale=sigmoid_scale,
     )
 
-    if path.exists(f"models/MF/checkpoints/best-model-{EMBEDDING_DIM}.ckpt"):
-        os.remove(f"models/MF/checkpoints/best-model-{EMBEDDING_DIM}.ckpt")
+    if path.exists(f"models/MF/checkpoints/{dataset_name}/best-model-{EMBEDDING_DIM}.ckpt"):
+        os.remove(f"models/MF/checkpoints/{dataset_name}/best-model-{EMBEDDING_DIM}.ckpt")
 
     callbacks = []
 
     if not is_tuning:
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
-            dirpath="models/MF/checkpoints",
+            dirpath=f"models/MF/checkpoints/{dataset_name}",
             filename=f"best-model-{EMBEDDING_DIM}",
             monitor="val_rmse",
             mode="min",
@@ -103,7 +103,7 @@ def train_MF(
 
     if not is_tuning:
 
-        model = CollaborativeFilteringModel.load_from_checkpoint(f"models/MF/checkpoints/best-model-{EMBEDDING_DIM}.ckpt")
+        model = CollaborativeFilteringModel.load_from_checkpoint(f"models/MF/checkpoints/{dataset_name}/best-model-{EMBEDDING_DIM}.ckpt")
 
         predicts = trainer.predict(model, data_module.test_dataloader())
         predicts = np.concatenate(predicts, axis=0)
@@ -113,9 +113,9 @@ def train_MF(
         if verbose: print(f"Test RMSE: {rmse:.3}")
 
     if not is_tuning:
-        os.makedirs("compressor_data", exist_ok=True)
-        data_module.train_df.to_csv(f"compressor_data/_train_{EMBEDDING_DIM}.csv", index=False)
-        data_module.test_df.to_csv(f"compressor_data/_test_{EMBEDDING_DIM}.csv", index=False)    
+        os.makedirs(F"compressor_data/{dataset_name}", exist_ok=True)
+        data_module.train_df.to_csv(f"compressor_data/{dataset_name}/_train_{EMBEDDING_DIM}.csv", index=False)
+        data_module.test_df.to_csv(f"compressor_data/{dataset_name}/_test_{EMBEDDING_DIM}.csv", index=False)    
 
     if is_tuning:
         return -model.min_val_loss

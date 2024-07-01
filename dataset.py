@@ -361,7 +361,7 @@ class EmbeddingDataModule(LightningDataModule):
         self.ids = ids
 
 
-        self.val_percentage = 0
+        self.val_percentage = 0.1
 
         self.dataset_train = EmbeddingDataset(self.embeddings[:ids.shape[0]-int(ids.shape[0]*self.val_percentage)])
 
@@ -403,42 +403,94 @@ class EmbeddingDataModule(LightningDataModule):
             return dataloader_known, dataloader_unknown
         
         return dataloader_known
+    
 
-class DyadicRegressionDistilDataset(Dataset):
-    """
-    Represents a dataset for regression over dyadic data.
-    """
+class EmbeddingDataModuleSimultaneous(LightningDataModule):
+    def __init__(self, embeddings, ids, batch_size=64, num_workers=0):
+        """
+        Creates a datamodule for embedding compression and reconstruction.
 
-    def __init__(self, df, user_embeds, item_embeds, user_bias, item_bias, global_bias):
+        Args:
+            embeddings (np.ndarray): Embeddings to be compressed
+            batch_size (int): Batch size
+            num_workers (int): Number of workers for the DataLoader
+        """
+        super().__init__()
+        self.user_embeddings, self.item_embeddings = embeddings
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.user_ids, self.item_ids = ids
 
-        self.data = df
-        self.data["user_id"] = self.data["user_id"].astype(np.int64)
-        self.data["item_id"] = self.data["item_id"].astype(np.int64)
-        self.data["rating"] = self.data["rating"].astype(np.float32)
+        self.val_percentage = 0.1
 
-        self.user_embeds = user_embeds
-        self.item_embeds = item_embeds
-        self.user_bias = user_bias
-        self.item_bias = item_bias
-        self.global_bias = global_bias
+        self.all_embeddings = np.concatenate([self.user_embeddings, self.item_embeddings], axis=0)
+        self.dataset_all = EmbeddingDataset(self.all_embeddings)
 
-    def __len__(self):
+        self.known_users = self.user_embeddings[:self.user_ids.shape[0]-int(self.user_ids.shape[0]*self.val_percentage)]
+        self.known_items = self.item_embeddings[:self.item_ids.shape[0]-int(self.item_ids.shape[0]*self.val_percentage)]
+
+        self.all_known = np.concatenate([self.known_users, self.known_items], axis=0)
+        self.dataset_known = EmbeddingDataset(self.all_known)
+        self.dataset_known_user = EmbeddingDataset(self.known_users)
+        self.dataset_known_item = EmbeddingDataset(self.known_items)
+
+        self.unknown_users = self.user_embeddings[self.user_ids.shape[0]-int(self.user_ids.shape[0]*self.val_percentage):]
+        self.unknown_items = self.item_embeddings[self.item_ids.shape[0]-int(self.item_ids.shape[0]*self.val_percentage):]
+
+        self.dataset_unknown_user = EmbeddingDataset(self.unknown_users)
+        self.dataset_unknown_item = EmbeddingDataset(self.unknown_items)
+
+        print(f"Total embeddings: {len(self.user_embeddings) + len(self.item_embeddings)}")
+        print(f"User embeddings: {len(self.user_embeddings)} (known: {len(self.known_users)}, unknown: {len(self.unknown_users)})")
+        print(f"Item embeddings: {len(self.item_embeddings)} (known: {len(self.known_items)}, unknown: {len(self.unknown_items)})")
+
+    def train_dataloader(self):
         """
         Returns:
-            int: Length of the dataset
+            torch.utils.data.DataLoader: DataLoader for the training set
         """
-        return len(self.data)
+        # dataloader_train = DataLoader(
+        #     self.dataset_known, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=True
+        # )
 
-    def __getitem__(self, idx):
+        return DataLoader(
+            self.dataset_known,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+        )
+
+        # return dataloader_train
+
+    def val_dataloader(self):
+        """
+        Returns:
+            torch.utils.data.DataLoader: DataLoader for the validation set (same as test set)
+        """
+
+        dataloaders = []
+
+        dataloaders.append(DataLoader(
+            self.dataset_known_user, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+        )
+        )
         
-        user_id = self.data.at[idx, "user_id"]
-        item_id = self.data.at[idx, "item_id"]
-        rating = self.data.at[idx, "rating"]
+        if self.val_percentage > 0:
+            dataloaders.append(DataLoader(
+                self.dataset_unknown_user, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+            )
+            )
 
-        user_embed = self.user_embeds[user_id]
-        item_embed = self.item_embeds[item_id]
-        user_bias = self.user_bias[user_id]
-        item_bias = self.item_bias[item_id]
-        global_bias = self.global_bias
+        dataloaders.append(DataLoader(
+            self.dataset_known_item, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+        )
+        )
 
-        return user_embed, item_embed, user_bias, item_bias, global_bias, rating
+        if self.val_percentage > 0:
+            dataloaders.append(DataLoader(
+                self.dataset_unknown_item, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+            )
+            )
+
+        return dataloaders
