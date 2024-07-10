@@ -267,7 +267,7 @@ class EmbeddingDataset(Dataset):
 
 
 class DyadicRegressionDataModule(LightningDataModule):
-    def __init__(self, data_dir, batch_size=64, num_workers=0, test_size=0.1, dataset_name="ml-1m", verbose=True):
+    def __init__(self, data_dir, batch_size=64, num_workers=0, test_size=0.1, dataset_name="ml-1m", split:int = None, verbose=True):
         """
         Creates a dyadic regression datamodule with a holdout train-test split.
         Downloads the dataset if it doesn't exist in the data directory.
@@ -284,23 +284,30 @@ class DyadicRegressionDataModule(LightningDataModule):
         self.num_workers = num_workers
         self.test_size = test_size
 
-        # Load the dataset from the file
-        if dataset_name.startswith("ml-"):
-            self.data = load_and_format_movielens_data(dataset_name)
-        elif dataset_name.startswith("tripadvisor-"):
-            self.data = load_and_format_tripadvisor_data(dataset_name)
-        elif dataset_name == "netflix-prize":
-            self.data = load_and_format_netflixprize_data(dataset_name)
-        elif dataset_name == "douban-monti":
-            self.data, self.train_df, self.test_df = load_and_format_doubanmonti_data(dataset_name)
+        if split is None:
+            # Load the dataset from the file
+            if dataset_name.startswith("ml-"):
+                self.data = load_and_format_movielens_data(dataset_name)
+            elif dataset_name.startswith("tripadvisor-"):
+                self.data = load_and_format_tripadvisor_data(dataset_name)
+            elif dataset_name == "netflix-prize":
+                self.data = load_and_format_netflixprize_data(dataset_name)
+            elif dataset_name == "douban-monti":
+                self.data, self.train_df, self.test_df = load_and_format_doubanmonti_data(dataset_name)
 
-        if dataset_name != "douban-monti":
-            # Split the df into train and test sets (pandas dataframe)
+            if dataset_name != "douban-monti":
+                # Split the df into train and test sets (pandas dataframe)
 
-            msk = np.random.rand(len(self.data)) < (1 - self.test_size)
+                msk = np.random.rand(len(self.data)) < (1 - self.test_size)
 
-            self.train_df = self.data[msk]
-            self.test_df = self.data[~msk]
+                self.train_df = self.data[msk]
+                self.test_df = self.data[~msk]
+
+        else:
+            print(f"Using pre-split data for split {split}")
+            self.train_df = pd.read_csv(f"data/{dataset_name}/splits/train_{split}.csv")
+            self.test_df = pd.read_csv(f"data/{dataset_name}/splits/test_{split}.csv")
+            self.data = pd.concat([self.train_df, self.test_df])
 
         # Calculate the number of users and items in the dataset
         self.num_users = self.data["user_id"].max() + 1

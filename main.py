@@ -20,11 +20,12 @@ saved_datamodule = None
 USE_BIASES = False
 ACTIVATION = "sigmoid"
 SIGMOID_SCALE = 1.0
-EMBEDDING_DIM = 32
+EMBEDDING_DIM = 512
+SPLIT = 1
 
 
 def train_MF(
-    dataset_name="ml-25m",
+    dataset_name="ml-1m",
     embedding_dim=EMBEDDING_DIM,
     data_dir="data",
     batch_size=2**15,
@@ -52,6 +53,7 @@ def train_MF(
             test_size=0.1,
             dataset_name=dataset_name,
             verbose=verbose,
+            split=SPLIT,
         )
         if saved_datamodule is None
         else saved_datamodule
@@ -69,14 +71,14 @@ def train_MF(
         sigmoid_scale=sigmoid_scale,
     )
 
-    if path.exists(f"models/MF/checkpoints/{dataset_name}/best-model-{EMBEDDING_DIM}.ckpt"):
-        os.remove(f"models/MF/checkpoints/{dataset_name}/best-model-{EMBEDDING_DIM}.ckpt")
+    if path.exists(f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}best-model-{EMBEDDING_DIM}.ckpt"):
+        os.remove(f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}best-model-{EMBEDDING_DIM}.ckpt")
 
     callbacks = []
 
     if not is_tuning:
         checkpoint_callback = pl.callbacks.ModelCheckpoint(
-            dirpath=f"models/MF/checkpoints/{dataset_name}",
+            dirpath=f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}",
             filename=f"best-model-{EMBEDDING_DIM}",
             monitor="val_rmse",
             mode="min",
@@ -109,7 +111,7 @@ def train_MF(
     if not is_tuning:
 
         model = CollaborativeFilteringModel.load_from_checkpoint(
-            f"models/MF/checkpoints/{dataset_name}/best-model-{EMBEDDING_DIM}.ckpt"
+            f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}best-model-{EMBEDDING_DIM}.ckpt"
         )
 
         predicts = trainer.predict(model, data_module.test_dataloader())
@@ -120,7 +122,7 @@ def train_MF(
         if verbose:
             print(f"Test RMSE: {rmse:.3}")
 
-    if not is_tuning:
+    if not is_tuning and SPLIT is None:
         os.makedirs(f"compressor_data/{dataset_name}", exist_ok=True)
         data_module.train_df.to_csv(f"compressor_data/{dataset_name}/_train_{EMBEDDING_DIM}.csv", index=False)
         data_module.test_df.to_csv(f"compressor_data/{dataset_name}/_test_{EMBEDDING_DIM}.csv", index=False)

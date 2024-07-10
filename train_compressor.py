@@ -7,7 +7,7 @@ from model import EmbeddingCompressor
 from collaborativefiltering_mf import CollaborativeFilteringModel
 from dataset import EmbeddingDataModule, DyadicRegressionDataset, EmbeddingDataModuleSimultaneous
 import pytorch_lightning as pl
-from callbacks import CFValidationCallback, CFValidationCallbackSimultaneous
+from callbacks import CFValidationCallback
 import copy
 
 logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
@@ -16,7 +16,8 @@ logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING
 ORIGIN_DIM = 512
 TARGET_DIM = 32
 MODE = "tune"
-DATASET = "ml-25m"
+DATASET = "ml-1m"
+SPLIT = 1
 
 
 def compute_rmse(model, train_data, test_data, user_ids=None, item_ids=None):
@@ -181,7 +182,7 @@ def train_compressor(
     trainer = pl.Trainer(
         gpus=1,
         enable_progress_bar=not is_tuning,
-        max_time="00:04:00:00",
+        max_time="00:00:45:00",
         enable_checkpointing=False,
         logger=False,
         enable_model_summary=False,
@@ -222,7 +223,7 @@ def train_compressor_both(
     trainer = pl.Trainer(
         gpus=1,
         enable_progress_bar=not is_tuning,
-        max_time="00:10:00:00",
+        max_time="00:00:10:00",
         enable_checkpointing=False,
         logger=False,
         enable_model_summary=False,
@@ -244,22 +245,48 @@ def train_compressor_both(
 
 if __name__ == "__main__":
 
-    model_original = CollaborativeFilteringModel.load_from_checkpoint(
-        f"models/MF/checkpoints/{DATASET}/best-model-{ORIGIN_DIM}.ckpt"
-    )
+    if SPLIT is None:
 
-    model_target = CollaborativeFilteringModel.load_from_checkpoint(
-        f"models/MF/checkpoints/{DATASET}/best-model-{TARGET_DIM}.ckpt"
-    )
+        model_original = CollaborativeFilteringModel.load_from_checkpoint(
+            f"models/MF/checkpoints/{DATASET}/best-model-{ORIGIN_DIM}.ckpt"
+        )
+
+        model_target = CollaborativeFilteringModel.load_from_checkpoint(
+            f"models/MF/checkpoints/{DATASET}/best-model-{TARGET_DIM}.ckpt"
+        )
+
+    else: 
+            
+            model_original = CollaborativeFilteringModel.load_from_checkpoint(
+                f"models/MF/checkpoints/{DATASET}/split{SPLIT}/best-model-{ORIGIN_DIM}.ckpt"
+            )
+    
+            model_target = CollaborativeFilteringModel.load_from_checkpoint(
+                f"models/MF/checkpoints/{DATASET}/split{SPLIT}/best-model-{TARGET_DIM}.ckpt"
+            )
 
     user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy()
     item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy()
 
-    train_data_og = pd.read_csv(f"compressor_data/{DATASET}/_train_{ORIGIN_DIM}.csv")
-    test_data_og = pd.read_csv(f"compressor_data/{DATASET}/_test_{ORIGIN_DIM}.csv")
+    if SPLIT is None:
 
-    train_data_tg = pd.read_csv(f"compressor_data/{DATASET}/_train_{TARGET_DIM}.csv")
-    test_data_tg = pd.read_csv(f"compressor_data/{DATASET}/_test_{TARGET_DIM}.csv")
+        train_data_og = pd.read_csv(f"compressor_data/{DATASET}/_train_{ORIGIN_DIM}.csv")
+        test_data_og = pd.read_csv(f"compressor_data/{DATASET}/_test_{ORIGIN_DIM}.csv")
+
+        train_data_tg = pd.read_csv(f"compressor_data/{DATASET}/_train_{TARGET_DIM}.csv")
+        test_data_tg = pd.read_csv(f"compressor_data/{DATASET}/_test_{TARGET_DIM}.csv")
+
+    else:
+
+        train_data_og = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
+        test_data_og = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
+
+        train_data_tg = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
+        test_data_tg = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
+
+    print(f"Train: {len(train_data_og)}, Test: {len(test_data_og)}\n"
+            f"Train: {len(train_data_tg)}, Test: {len(test_data_tg)}")
+    
 
     user_ids = np.union1d(train_data_og["user_id"].unique(), test_data_og["user_id"].unique())
     item_ids = np.union1d(train_data_og["item_id"].unique(), test_data_og["item_id"].unique())
