@@ -15,10 +15,11 @@ logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING
 
 ORIGIN_DIM = 512
 TARGET_DIM = 32
-MODE="tune"
-DATASET = "netflix-prize"
+MODE = "tune"
+DATASET = "ml-25m"
 
-def compute_rmse(model, train_data, test_data, user_ids = None, item_ids = None):
+
+def compute_rmse(model, train_data, test_data, user_ids=None, item_ids=None):
 
     trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
 
@@ -27,96 +28,165 @@ def compute_rmse(model, train_data, test_data, user_ids = None, item_ids = None)
     # )
 
     if user_ids is not None:
-        val_percent = 0
+        val_percent = 0.1
 
-        known_users = user_ids[:( len(user_ids) - int(len(user_ids) * val_percent))]
-        unknown_users = user_ids[( len(user_ids) - int(len(user_ids) * val_percent)):]
+        known_users = user_ids[: (len(user_ids) - int(len(user_ids) * val_percent))]
+        unknown_users = user_ids[(len(user_ids) - int(len(user_ids) * val_percent)) :]
 
-        known_items = item_ids[:( len(item_ids) - int(len(item_ids) * val_percent))]
-        unknown_items = item_ids[( len(item_ids) - int(len(item_ids) * val_percent)):]
+        known_items = item_ids[: (len(item_ids) - int(len(item_ids) * val_percent))]
+        unknown_items = item_ids[(len(item_ids) - int(len(item_ids) * val_percent)) :]
 
-        test_data_known = test_data[test_data["user_id"].isin(known_users) | test_data["item_id"].isin(known_items)].reset_index(drop=True)
-        test_data_unknown = test_data[test_data["user_id"].isin(unknown_users) & test_data["item_id"].isin(unknown_items)].reset_index(drop=True)
+        test_data_ui = test_data[
+            test_data["user_id"].isin(known_users) & test_data["item_id"].isin(known_items)
+        ].reset_index(drop=True)
+        test_data_un = test_data[
+            test_data["user_id"].isin(known_users) & test_data["item_id"].isin(unknown_items)
+        ].reset_index(drop=True)
+        test_data_ni = test_data[
+            test_data["user_id"].isin(unknown_users) & test_data["item_id"].isin(known_items)
+        ].reset_index(drop=True)
+        test_data_nn = test_data[
+            test_data["user_id"].isin(unknown_users) & test_data["item_id"].isin(unknown_items)
+        ].reset_index(drop=True)
 
         test_dataloaders = []
-        
-        test_dataloaders.append(torch.utils.data.DataLoader(
-            DyadicRegressionDataset(test_data_known), batch_size=2**10, shuffle=False, num_workers=1, persistent_workers=True
-        ))
 
-        if len(test_data_unknown) > 0: 
-            test_dataloaders.append(
-
-        torch.utils.data.DataLoader(
-            DyadicRegressionDataset(test_data_unknown), batch_size=2**10, shuffle=False, num_workers=1, persistent_workers=True
+        test_dataloaders.append(
+            torch.utils.data.DataLoader(
+                DyadicRegressionDataset(test_data_ui),
+                batch_size=2**10,
+                shuffle=False,
+                num_workers=1,
+                persistent_workers=True,
+            )
         )
+
+        if len(test_data_nn) > 0:
+            test_dataloaders.append(
+                torch.utils.data.DataLoader(
+                    DyadicRegressionDataset(test_data_un),
+                    batch_size=2**10,
+                    shuffle=False,
+                    num_workers=1,
+                    persistent_workers=True,
+                )
+            )
+            test_dataloaders.append(
+                torch.utils.data.DataLoader(
+                    DyadicRegressionDataset(test_data_ni),
+                    batch_size=2**10,
+                    shuffle=False,
+                    num_workers=1,
+                    persistent_workers=True,
+                )
+            )
+            test_dataloaders.append(
+                torch.utils.data.DataLoader(
+                    DyadicRegressionDataset(test_data_nn),
+                    batch_size=2**10,
+                    shuffle=False,
+                    num_workers=1,
+                    persistent_workers=True,
+                )
             )
 
-    else: 
-        test_dataloaders = [torch.utils.data.DataLoader(
-            DyadicRegressionDataset(test_data), batch_size=2**10, shuffle=False, num_workers=1, persistent_workers=True
-        )]
+    else:
+        test_dataloaders = [
+            torch.utils.data.DataLoader(
+                DyadicRegressionDataset(test_data),
+                batch_size=2**10,
+                shuffle=False,
+                num_workers=1,
+                persistent_workers=True,
+            )
+        ]
 
     # train_rmse = trainer.validate(model, dataloaders=train_dataloader, verbose=False)[0]["val_rmse"]
 
     test_losses = trainer.validate(model, dataloaders=test_dataloaders, verbose=False)
 
-
-
     # print(f"Train RMSE: {train_rmse:.4f}")
     print(f"Validation RMSE: {test_losses[0]['val_rmse']:.3f}")
 
-    if len(test_losses) == 2:
-        val_rmse_known = test_losses[0]["val_rmse"]
-        val_rmse_unknown = test_losses[1]["val_rmse"]
+    if len(test_losses) > 1:
 
-        print(f"Validation RMSE (known): {val_rmse_known:.4f}")
-        print(f"Validation RMSE (unknown): {val_rmse_unknown:.4f}")
-        
+        val_rmse_ui = test_losses[0]["val_rmse/dataloader_idx_0"]
+        val_rmse_un = test_losses[1]["val_rmse/dataloader_idx_1"]
+        val_rmse_ni = test_losses[2]["val_rmse/dataloader_idx_2"]
+        val_rmse_nn = test_losses[3]["val_rmse/dataloader_idx_3"]
+
+        print(f"Validation RMSE (both known): {val_rmse_ui:.3f}")
+        print(f"Validation RMSE (user known, item unknown): {val_rmse_un:.3f}")
+        print(f"Validation RMSE (user unknown, item known): {val_rmse_ni:.3f}")
+        print(f"Validation RMSE (both unknown): {val_rmse_nn:.3f}")
+
 
 def train_compressor(
-        embeddings = None,
-        origin_dim= None,
-        target_dim= None,
-        lr=1e-4,
-        l2_reg=1e-4,
-        is_tuning=False,
-        cf_model = None,
-        cf_val_data= None,
-        side = "user",
-        ids = None
+    embeddings=None,
+    origin_dim=None,
+    target_dim=None,
+    lr=1e-4,
+    l2_reg=1e-4,
+    is_tuning=False,
+    cf_model=None,
+    cf_val_data=None,
+    side="user",
+    ids=None,
 ):
 
-    data_module = EmbeddingDataModule(embeddings, ids=ids, batch_size=2**11 if side=='user' else 2**8, num_workers=4)
+    data_module = EmbeddingDataModule(
+        embeddings, ids=ids, batch_size=2**12 if side == "user" else 2**12, num_workers=4
+    )
 
     compressor = EmbeddingCompressor(origin_dim, target_dim, lr=lr, l2_reg=l2_reg)
 
     val_percent = 0.1
 
-    ids_known = ids[:( len(ids) - int(len(ids) * val_percent))]
-    ids_unknown = ids[( len(ids) - int(len(ids) * val_percent)):]
+    ids_known = ids[: (len(ids) - int(len(ids) * val_percent))]
+    ids_unknown = ids[(len(ids) - int(len(ids) * val_percent)) :]
+
+    print(f"Known: {len(ids_known)}, Unknown: {len(ids_unknown)}")
 
     cf_val_data_known = cf_val_data[cf_val_data[side + "_id"].isin(ids_known)].reset_index(drop=True)
     cf_val_data_unknown = cf_val_data[cf_val_data[side + "_id"].isin(ids_unknown)].reset_index(drop=True)
 
+    print(f"Known: {len(cf_val_data_known)}, Unknown: {len(cf_val_data_unknown)}")
+
     dataloader_known = torch.utils.data.DataLoader(
-        DyadicRegressionDataset(cf_val_data_known), batch_size=2**10, shuffle=False, num_workers=4, persistent_workers=True
+        DyadicRegressionDataset(cf_val_data_known),
+        batch_size=2**10,
+        shuffle=False,
+        num_workers=4,
+        persistent_workers=True,
     )
 
     dataloader_unknown = torch.utils.data.DataLoader(
-        DyadicRegressionDataset(cf_val_data_unknown), batch_size=2**10, shuffle=False, num_workers=4, persistent_workers=True
+        DyadicRegressionDataset(cf_val_data_unknown),
+        batch_size=2**10,
+        shuffle=False,
+        num_workers=4,
+        persistent_workers=True,
     )
 
     val_cf_callback = CFValidationCallback(
         cf_model=cf_model,
-        validation_dataloaders=[dataloader_known, dataloader_unknown] if len(cf_val_data_unknown) > 0 else [dataloader_known],
+        validation_dataloaders=(
+            [dataloader_known, dataloader_unknown] if len(cf_val_data_unknown) > 0 else [dataloader_known]
+        ),
         side=side,
-        ids = ids,
-        dataset=DATASET
+        ids=ids,
+        dataset=DATASET,
     )
 
     trainer = pl.Trainer(
-        gpus=1, enable_progress_bar=not is_tuning, max_time="00:04:00:00", enable_checkpointing=False, logger=False, enable_model_summary=False, callbacks=[val_cf_callback], num_sanity_val_steps=-1   
+        gpus=1,
+        enable_progress_bar=not is_tuning,
+        max_time="00:04:00:00",
+        enable_checkpointing=False,
+        logger=False,
+        enable_model_summary=False,
+        callbacks=[val_cf_callback],
+        num_sanity_val_steps=-1,
     )
 
     trainer.fit(compressor, data_module)
@@ -124,36 +194,40 @@ def train_compressor(
     predicts = trainer.predict(compressor, dataloaders=data_module.val_dataloader())
     # Concat the predictions from various dataloaders
     if len(predicts) == 2:
-        for i in range(len(predicts)): 
+        for i in range(len(predicts)):
             predicts[i] = np.concatenate(predicts[i], axis=0)
     compressed_embeddings = np.concatenate(predicts, axis=0)
 
     return compressed_embeddings
 
+
 def train_compressor_both(
-        embeddings = None,
-        origin_dim= None,
-        target_dim= None,
-        lr=1e-4,
-        l2_reg=1e-4,
-        is_tuning=False,
-        cf_model = None,
-        cf_val_data= None,
-        ids = None
+    embeddings=None,
+    origin_dim=None,
+    target_dim=None,
+    lr=1e-4,
+    l2_reg=1e-4,
+    is_tuning=False,
+    cf_model=None,
+    cf_val_data=None,
+    ids=None,
 ):
 
     data_module = EmbeddingDataModuleSimultaneous(embeddings, ids=ids, batch_size=256, num_workers=4)
 
     compressor = EmbeddingCompressor(origin_dim, target_dim, lr=lr, l2_reg=l2_reg)
 
-    val_cf_callback = CFValidationCallbackSimultaneous(
-        cf_model=cf_model,
-        validation_data=cf_val_data,
-        ids = ids
-    )
+    val_cf_callback = CFValidationCallbackSimultaneous(cf_model=cf_model, validation_data=cf_val_data, ids=ids)
 
     trainer = pl.Trainer(
-        gpus=1, enable_progress_bar=not is_tuning, max_time="00:10:00:00", enable_checkpointing=False, logger=False, enable_model_summary=False, callbacks=[val_cf_callback], num_sanity_val_steps=-1   
+        gpus=1,
+        enable_progress_bar=not is_tuning,
+        max_time="00:10:00:00",
+        enable_checkpointing=False,
+        logger=False,
+        enable_model_summary=False,
+        callbacks=[val_cf_callback],
+        num_sanity_val_steps=-1,
     )
 
     trainer.fit(compressor, data_module)
@@ -161,7 +235,7 @@ def train_compressor_both(
     predicts = trainer.predict(compressor, dataloaders=data_module.val_dataloader())
     # Concat the predictions from various dataloaders
     if len(predicts) > 1:
-        for i in range(len(predicts)): 
+        for i in range(len(predicts)):
             predicts[i] = np.concatenate(predicts[i], axis=0)
     compressed_embeddings = np.concatenate(predicts, axis=0)
 
@@ -202,15 +276,14 @@ if __name__ == "__main__":
     # Change to right axis
     plt.ylabel("Frequency")
     plt.xlabel("Value")
-    plt.legend(loc = "upper left")
-
+    plt.legend(loc="upper left")
 
     # Change to right y-axis
     plt.twinx()
     plt.hist(item_embeddings.flatten(), bins=100, alpha=0.5, label="Item Embeddings Values", color="blue")
     plt.yscale("log")
 
-    plt.legend(loc = "upper right")
+    plt.legend(loc="upper right")
     plt.savefig(f"compressor_data/{DATASET}/embeddings_values.pdf")
     plt.clf()
 
@@ -218,16 +291,45 @@ if __name__ == "__main__":
 
     if BOTH_SIDES:
 
-        compressed_embeddings = train_compressor_both((user_embeddings, item_embeddings), ORIGIN_DIM, TARGET_DIM, 1e-4, 0, cf_model=copy.deepcopy(model_original), cf_val_data=test_data_og, ids=(user_ids, item_ids))
-        compressed_user_embeddings, compressed_item_embeddings  = compressed_embeddings[:len(user_ids)], compressed_embeddings[len(user_ids):]
-
+        compressed_embeddings = train_compressor_both(
+            (user_embeddings, item_embeddings),
+            ORIGIN_DIM,
+            TARGET_DIM,
+            1e-4,
+            0,
+            cf_model=copy.deepcopy(model_original),
+            cf_val_data=test_data_og,
+            ids=(user_ids, item_ids),
+        )
+        compressed_user_embeddings, compressed_item_embeddings = (
+            compressed_embeddings[: len(user_ids)],
+            compressed_embeddings[len(user_ids) :],
+        )
 
     else:
 
-        compressed_user_embeddings = train_compressor(user_embeddings, ORIGIN_DIM, TARGET_DIM, 1e-4, 0, cf_model=copy.deepcopy(model_original), cf_val_data=test_data_og, side="user", ids=user_ids)
-        compressed_item_embeddings = train_compressor(item_embeddings, ORIGIN_DIM, TARGET_DIM, 1e-4, 0, cf_model=copy.deepcopy(model_original), cf_val_data=test_data_og, side="item", ids=item_ids)
-
-   
+        compressed_user_embeddings = train_compressor(
+            user_embeddings,
+            ORIGIN_DIM,
+            TARGET_DIM,
+            1e-4,
+            0,
+            cf_model=copy.deepcopy(model_original),
+            cf_val_data=test_data_og,
+            side="user",
+            ids=user_ids,
+        )
+        compressed_item_embeddings = train_compressor(
+            item_embeddings,
+            ORIGIN_DIM,
+            TARGET_DIM,
+            1e-4,
+            0,
+            cf_model=copy.deepcopy(model_original),
+            cf_val_data=test_data_og,
+            side="item",
+            ids=item_ids,
+        )
 
     #############################
     # 1. ORIGINAL EMBEDDINGS
@@ -235,7 +337,6 @@ if __name__ == "__main__":
 
     # Get the RSME of the original embeddings (in the original and target dims)
 
-    
     print(f"Original Embeddings (dim={ORIGIN_DIM})")
     compute_rmse(model_original, train_data_og, test_data_og)
 
@@ -256,8 +357,6 @@ if __name__ == "__main__":
     model_original.item_embedding.weight.data[item_ids] = torch.tensor(compressed_item_embeddings).to(
         model_original.device
     )
-
-
 
     print(f"Compressed Embeddings (dim={ORIGIN_DIM} -> {TARGET_DIM})")
     compute_rmse(model_original, train_data_og, test_data_og, user_ids=user_ids, item_ids=item_ids)

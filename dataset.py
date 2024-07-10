@@ -6,12 +6,14 @@ from pytorch_lightning import LightningDataModule
 import h5py
 import torch
 
+
 class FastTensorDataLoader:
     """
     A DataLoader-like object for a set of tensors that can be much faster than
     TensorDataset + DataLoader because dataloader grabs individual indices of
     the dataset and calls cat (slow).
     """
+
     def __init__(self, *tensors, batch_size=32, shuffle=False):
         """
         Initialize a FastTensorDataLoader.
@@ -48,12 +50,12 @@ class FastTensorDataLoader:
         if self.i >= self.dataset_len:
             raise StopIteration
         if self.indices is not None:
-            indices = self.indices[self.i:self.i+self.batch_size]
+            indices = self.indices[self.i : self.i + self.batch_size]
             batch = tuple(torch.index_select(t, 0, indices) for t in self.tensors)
             if len(self.tensors) == 1:
                 batch = batch[0]
         else:
-            batch = tuple(t[self.i:self.i+self.batch_size] for t in self.tensors)
+            batch = tuple(t[self.i : self.i + self.batch_size] for t in self.tensors)
             if len(self.tensors) == 1:
                 batch = batch[0]
         self.i += self.batch_size
@@ -61,6 +63,7 @@ class FastTensorDataLoader:
 
     def __len__(self):
         return self.n_batches
+
 
 def load_and_format_tripadvisor_data(dataset_name):
     """
@@ -110,6 +113,8 @@ def load_and_format_movielens_data(dataset_name):
         df = pd.read_csv(os.path.join("data", dataset_name, "u.data"), sep="\t", header=None)
     elif dataset_name in ["ml-1m", "ml-10m"]:
         df = pd.read_csv(os.path.join("data", dataset_name, "ratings.dat"), sep="::", engine="python", header=None)
+    elif dataset_name in ["ml-25m"]:
+        df = pd.read_csv(os.path.join("data", dataset_name, "ratings.csv"), sep=",", engine="python")
     df.columns = ["user_id", "item_id", "rating", "timestamp"]
     df = df[["user_id", "item_id", "rating"]]
 
@@ -228,7 +233,8 @@ class DyadicRegressionDataset(Dataset):
         rating = self.data.at[idx, "rating"]
 
         return user_id, item_id, rating
-    
+
+
 class EmbeddingDataset(Dataset):
     """
     Dataset for embedding compression and reconstruction.
@@ -305,8 +311,7 @@ class DyadicRegressionDataModule(LightningDataModule):
         self.min_rating = self.data["rating"].min()
         self.max_rating = self.data["rating"].max()
 
-
-        if verbose: 
+        if verbose:
             print(f"#Users: {self.num_users} (max id {self.data['user_id'].max()})")
             print(f"#Items: {self.num_items} (max id {self.data['item_id'].max()})")
             print(f"Mean rating: {self.mean_rating:.3f}")
@@ -320,7 +325,7 @@ class DyadicRegressionDataModule(LightningDataModule):
         self.test_dataset = DyadicRegressionDataset(self.test_df)
 
     def train_dataloader(self):
-        
+
         return FastTensorDataLoader(
             torch.tensor(self.train_df["user_id"].values),
             torch.tensor(self.train_df["item_id"].values),
@@ -342,7 +347,7 @@ class DyadicRegressionDataModule(LightningDataModule):
         return DataLoader(
             self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
         )
-    
+
 
 class EmbeddingDataModule(LightningDataModule):
     def __init__(self, embeddings, ids, batch_size=64, num_workers=0):
@@ -360,13 +365,13 @@ class EmbeddingDataModule(LightningDataModule):
         self.num_workers = num_workers
         self.ids = ids
 
-
         self.val_percentage = 0.1
 
-        self.dataset_train = EmbeddingDataset(self.embeddings[:ids.shape[0]-int(ids.shape[0]*self.val_percentage)])
+        self.known_embeddings = self.embeddings[: ids.shape[0] - int(ids.shape[0] * self.val_percentage)]
+        self.unknown_embeddings = self.embeddings[ids.shape[0] - int(ids.shape[0] * self.val_percentage) :]
 
-        self.dataset_known = EmbeddingDataset(self.embeddings[:ids.shape[0]-int(ids.shape[0]*self.val_percentage)])
-        self.dataset_unknown = EmbeddingDataset(self.embeddings[ids.shape[0]-int(ids.shape[0]*self.val_percentage):])
+        self.dataset_known = EmbeddingDataset(self.known_embeddings)
+        self.dataset_unknown = EmbeddingDataset(self.unknown_embeddings)
 
         print(f"Total embeddings: {len(self.embeddings)}")
         print(f"Known embeddings: {len(self.dataset_known)}")
@@ -378,12 +383,12 @@ class EmbeddingDataModule(LightningDataModule):
             torch.utils.data.DataLoader: DataLoader for the training set
         """
         return DataLoader(
-            self.dataset_train,
+            self.dataset_known,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
             persistent_workers=True,
-        ) 
+        )
 
     def val_dataloader(self):
         """
@@ -392,18 +397,26 @@ class EmbeddingDataModule(LightningDataModule):
         """
 
         dataloader_known = DataLoader(
-            self.dataset_known, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+            self.dataset_known,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=True,
+            shuffle=False,
         )
 
         if len(self.dataset_unknown) > 0:
             dataloader_unknown = DataLoader(
-                self.dataset_unknown, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+                self.dataset_unknown,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                shuffle=False,
             )
 
             return dataloader_known, dataloader_unknown
-        
+
         return dataloader_known
-    
+
 
 class EmbeddingDataModuleSimultaneous(LightningDataModule):
     def __init__(self, embeddings, ids, batch_size=64, num_workers=0):
@@ -426,23 +439,35 @@ class EmbeddingDataModuleSimultaneous(LightningDataModule):
         self.all_embeddings = np.concatenate([self.user_embeddings, self.item_embeddings], axis=0)
         self.dataset_all = EmbeddingDataset(self.all_embeddings)
 
-        self.known_users = self.user_embeddings[:self.user_ids.shape[0]-int(self.user_ids.shape[0]*self.val_percentage)]
-        self.known_items = self.item_embeddings[:self.item_ids.shape[0]-int(self.item_ids.shape[0]*self.val_percentage)]
+        self.known_users = self.user_embeddings[
+            : self.user_ids.shape[0] - int(self.user_ids.shape[0] * self.val_percentage)
+        ]
+        self.known_items = self.item_embeddings[
+            : self.item_ids.shape[0] - int(self.item_ids.shape[0] * self.val_percentage)
+        ]
 
         self.all_known = np.concatenate([self.known_users, self.known_items], axis=0)
         self.dataset_known = EmbeddingDataset(self.all_known)
         self.dataset_known_user = EmbeddingDataset(self.known_users)
         self.dataset_known_item = EmbeddingDataset(self.known_items)
 
-        self.unknown_users = self.user_embeddings[self.user_ids.shape[0]-int(self.user_ids.shape[0]*self.val_percentage):]
-        self.unknown_items = self.item_embeddings[self.item_ids.shape[0]-int(self.item_ids.shape[0]*self.val_percentage):]
+        self.unknown_users = self.user_embeddings[
+            self.user_ids.shape[0] - int(self.user_ids.shape[0] * self.val_percentage) :
+        ]
+        self.unknown_items = self.item_embeddings[
+            self.item_ids.shape[0] - int(self.item_ids.shape[0] * self.val_percentage) :
+        ]
 
         self.dataset_unknown_user = EmbeddingDataset(self.unknown_users)
         self.dataset_unknown_item = EmbeddingDataset(self.unknown_items)
 
         print(f"Total embeddings: {len(self.user_embeddings) + len(self.item_embeddings)}")
-        print(f"User embeddings: {len(self.user_embeddings)} (known: {len(self.known_users)}, unknown: {len(self.unknown_users)})")
-        print(f"Item embeddings: {len(self.item_embeddings)} (known: {len(self.known_items)}, unknown: {len(self.unknown_items)})")
+        print(
+            f"User embeddings: {len(self.user_embeddings)} (known: {len(self.known_users)}, unknown: {len(self.unknown_users)})"
+        )
+        print(
+            f"Item embeddings: {len(self.item_embeddings)} (known: {len(self.known_items)}, unknown: {len(self.unknown_items)})"
+        )
 
     def train_dataloader(self):
         """
@@ -471,26 +496,46 @@ class EmbeddingDataModuleSimultaneous(LightningDataModule):
 
         dataloaders = []
 
-        dataloaders.append(DataLoader(
-            self.dataset_known_user, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
-        )
-        )
-        
-        if self.val_percentage > 0:
-            dataloaders.append(DataLoader(
-                self.dataset_unknown_user, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+        dataloaders.append(
+            DataLoader(
+                self.dataset_known_user,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                shuffle=False,
             )
-            )
-
-        dataloaders.append(DataLoader(
-            self.dataset_known_item, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
-        )
         )
 
         if self.val_percentage > 0:
-            dataloaders.append(DataLoader(
-                self.dataset_unknown_item, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True, shuffle=False
+            dataloaders.append(
+                DataLoader(
+                    self.dataset_unknown_user,
+                    batch_size=self.batch_size,
+                    num_workers=self.num_workers,
+                    persistent_workers=True,
+                    shuffle=False,
+                )
             )
+
+        dataloaders.append(
+            DataLoader(
+                self.dataset_known_item,
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                shuffle=False,
+            )
+        )
+
+        if self.val_percentage > 0:
+            dataloaders.append(
+                DataLoader(
+                    self.dataset_unknown_item,
+                    batch_size=self.batch_size,
+                    num_workers=self.num_workers,
+                    persistent_workers=True,
+                    shuffle=False,
+                )
             )
 
         return dataloaders
