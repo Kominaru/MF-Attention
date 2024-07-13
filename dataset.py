@@ -267,7 +267,16 @@ class EmbeddingDataset(Dataset):
 
 
 class DyadicRegressionDataModule(LightningDataModule):
-    def __init__(self, data_dir, batch_size=64, num_workers=0, test_size=0.1, dataset_name="ml-1m", split:int = None, verbose=True):
+    def __init__(
+        self,
+        data_dir,
+        batch_size=64,
+        num_workers=0,
+        test_size=0.1,
+        dataset_name="ml-1m",
+        split: int = None,
+        verbose=False,
+    ):
         """
         Creates a dyadic regression datamodule with a holdout train-test split.
         Downloads the dataset if it doesn't exist in the data directory.
@@ -304,7 +313,7 @@ class DyadicRegressionDataModule(LightningDataModule):
                 self.test_df = self.data[~msk]
 
         else:
-            print(f"Using pre-split data for split {split}")
+            # print(f"Using pre-split data for split {split}")
             self.train_df = pd.read_csv(f"data/{dataset_name}/splits/train_{split}.csv")
             self.test_df = pd.read_csv(f"data/{dataset_name}/splits/test_{split}.csv")
             self.data = pd.concat([self.train_df, self.test_df])
