@@ -6,11 +6,12 @@ from bayes_opt import BayesianOptimization
 import torch
 from collaborativefiltering_mf import CollaborativeFilteringModel
 from dataset import DyadicRegressionDataModule
+from argparse import ArgumentParser
 
 import logging
 
-# logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
-# logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
+logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
+logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
 
 DATA_DIR = "data"
 MODE = "train"
@@ -22,10 +23,23 @@ ACTIVATION = "sigmoid"
 SIGMOID_SCALE = 1.0
 EMBEDDING_DIM = 512
 SPLIT = 1
+DATASET = "ml-1m"
+
+# Create command line arguments for embedding dimension, dataset, and split
+
+args = ArgumentParser()
+args.add_argument("--d", type=int, default=EMBEDDING_DIM)
+args.add_argument("--dataset", type=str, default=DATASET)
+args.add_argument("--split", type=int, default=SPLIT)
+args = args.parse_args()
+
+EMBEDDING_DIM = args.d
+DATASET = args.dataset
+SPLIT = args.split
 
 
 def train_MF(
-    dataset_name="ml-1m",
+    dataset_name=DATASET,
     embedding_dim=EMBEDDING_DIM,
     data_dir="data",
     batch_size=2**15,
@@ -71,8 +85,12 @@ def train_MF(
         sigmoid_scale=sigmoid_scale,
     )
 
-    if path.exists(f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}best-model-{EMBEDDING_DIM}.ckpt"):
-        os.remove(f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}best-model-{EMBEDDING_DIM}.ckpt")
+    if path.exists(
+        f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}best-model-{EMBEDDING_DIM}.ckpt"
+    ):
+        os.remove(
+            f"models/MF/checkpoints/{dataset_name}/{'split' + str(SPLIT) + '/' if SPLIT is not None else ''}best-model-{EMBEDDING_DIM}.ckpt"
+        )
 
     callbacks = []
 
@@ -119,8 +137,7 @@ def train_MF(
 
         rmse = np.sqrt(np.mean((predicts - data_module.test_df["rating"].values) ** 2))
 
-        if verbose:
-            print(f"Test RMSE: {rmse:.3}")
+        print(f"Test RMSE: {rmse:.3}")
 
     if not is_tuning and SPLIT is None:
         os.makedirs(f"compressor_data/{dataset_name}", exist_ok=True)
@@ -136,7 +153,7 @@ def train_MF(
 if __name__ == "__main__":
 
     if MODE == "train":
-        train_MF(verbose=1)
+        train_MF(verbose=0)
 
     elif MODE == "tune":
 

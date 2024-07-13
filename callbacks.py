@@ -4,22 +4,26 @@ import matplotlib.pyplot as plt
 
 from dataset import DyadicRegressionDataset
 
-DATASET_RANGES = {
-    "ml-1m": (0.835, 0.860),
-    "ml-10m": (0.765, 0.790),
-    "ml-25m": (0.740, 0.765)
-}
+DATASET_RANGES = {"ml-1m": (0.835, 0.860), "ml-10m": (0.765, 0.790), "ml-25m": (0.740, 0.765)}
 
 
 class CFValidationCallback(pl.callbacks.Callback):
-    def __init__(self, cf_model, validation_dataloaders, side="user", ids=None, dataset=None):
+    def __init__(self, cf_model, validation_dataloaders, side="user", ids=None, dataset=None, split=None):
         super().__init__()
         self.cf_model = cf_model
         self.val_dataloader = validation_dataloaders
         self.side = side
-        self.state = {"val_cf_rmse_known": [], "val_cf_rmse_unknown": [], "val_cf_rmse": [], "epoch": [], "known_loss": [], "unknown_loss": []}
+        self.state = {
+            "val_cf_rmse_known": [],
+            "val_cf_rmse_unknown": [],
+            "val_cf_rmse": [],
+            "epoch": [],
+            "known_loss": [],
+            "unknown_loss": [],
+        }
         self.ids = ids
         self.dataset = dataset
+        self.split = split
 
     def on_validation_epoch_end(self, trainer, pl_module):
 
@@ -87,8 +91,18 @@ class CFValidationCallback(pl.callbacks.Callback):
 
         # plt.plot(self.state["epoch"], self.state["val_cf_rmse"])
         if len(self.state["val_cf_rmse_known"]) > 0:
-            plt.plot(self.state["epoch"][15:], self.state["val_cf_rmse_known"][15:], label=f"Known {self.side}s", color="red")
-            plt.plot(self.state["epoch"][15:], self.state["val_cf_rmse_unknown"][15:], label=f"Unknown {self.side}s", color="blue")
+            plt.plot(
+                self.state["epoch"][15:],
+                self.state["val_cf_rmse_known"][15:],
+                label=f"Known {self.side}s",
+                color="red",
+            )
+            plt.plot(
+                self.state["epoch"][15:],
+                self.state["val_cf_rmse_unknown"][15:],
+                label=f"Unknown {self.side}s",
+                color="blue",
+            )
             # plt.plot(self.state["epoch"][15:], self.state["val_cf_rmse"][15:], label=f"All {self.side}s", color="purple")
 
         plt.xlabel("Compressor Epoch")
@@ -98,16 +112,29 @@ class CFValidationCallback(pl.callbacks.Callback):
 
         plt.ylim(DATASET_RANGES[self.dataset])
 
-
         plt.twinx()
 
-        plt.plot([i for i in range(50,len(self.state["known_loss"]))], self.state["known_loss"][50:], label="Known Loss", color="red", alpha=0.5)
-        plt.plot([i for i in range(50,len(self.state["unknown_loss"]))], self.state["unknown_loss"][50:], label="Unknown Loss", color="blue", alpha=0.5)
+        plt.plot(
+            [i for i in range(50, len(self.state["known_loss"]))],
+            self.state["known_loss"][50:],
+            label="Known Loss",
+            color="red",
+            alpha=0.5,
+        )
+        plt.plot(
+            [i for i in range(50, len(self.state["unknown_loss"]))],
+            self.state["unknown_loss"][50:],
+            label="Unknown Loss",
+            color="blue",
+            alpha=0.5,
+        )
 
         plt.ylabel("Reconstruction Loss")
 
         plt.title(f"Validation RMSE of the Compressed Model ({self.side})")
-        plt.legend(loc = "upper right")
+        plt.legend(loc="upper right")
         plt.tight_layout()
-        plt.savefig(f"compressor_data/{self.dataset}/{self.side}_validation_rmse.pdf")
+        plt.savefig(
+            f"compressor_data/{self.dataset}/{self.side}_validation_rmse_{self.split if self.split is not None else ''}.pdf"
+        )
         plt.clf()

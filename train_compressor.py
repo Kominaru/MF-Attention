@@ -177,6 +177,7 @@ def train_compressor(
         side=side,
         ids=ids,
         dataset=DATASET,
+        split=SPLIT,
     )
 
     trainer = pl.Trainer(
@@ -255,15 +256,15 @@ if __name__ == "__main__":
             f"models/MF/checkpoints/{DATASET}/best-model-{TARGET_DIM}.ckpt"
         )
 
-    else: 
-            
-            model_original = CollaborativeFilteringModel.load_from_checkpoint(
-                f"models/MF/checkpoints/{DATASET}/split{SPLIT}/best-model-{ORIGIN_DIM}.ckpt"
-            )
-    
-            model_target = CollaborativeFilteringModel.load_from_checkpoint(
-                f"models/MF/checkpoints/{DATASET}/split{SPLIT}/best-model-{TARGET_DIM}.ckpt"
-            )
+    else:
+
+        model_original = CollaborativeFilteringModel.load_from_checkpoint(
+            f"models/MF/checkpoints/{DATASET}/split{SPLIT}/best-model-{ORIGIN_DIM}.ckpt"
+        )
+
+        model_target = CollaborativeFilteringModel.load_from_checkpoint(
+            f"models/MF/checkpoints/{DATASET}/split{SPLIT}/best-model-{TARGET_DIM}.ckpt"
+        )
 
     user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy()
     item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy()
@@ -284,9 +285,10 @@ if __name__ == "__main__":
         train_data_tg = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
         test_data_tg = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
 
-    print(f"Train: {len(train_data_og)}, Test: {len(test_data_og)}\n"
-            f"Train: {len(train_data_tg)}, Test: {len(test_data_tg)}")
-    
+    print(
+        f"Train: {len(train_data_og)}, Test: {len(test_data_og)}\n"
+        f"Train: {len(train_data_tg)}, Test: {len(test_data_tg)}"
+    )
 
     user_ids = np.union1d(train_data_og["user_id"].unique(), test_data_og["user_id"].unique())
     item_ids = np.union1d(train_data_og["item_id"].unique(), test_data_og["item_id"].unique())
