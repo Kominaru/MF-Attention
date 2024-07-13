@@ -19,8 +19,18 @@ MODE = "tune"
 DATASET = "ml-1m"
 SPLIT = 1
 
+def compute_rmse(model, data):
+    trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
 
-def compute_rmse(model, train_data, test_data, user_ids=None, item_ids=None):
+    test_dataloader = torch.utils.data.DataLoader(
+        DyadicRegressionDataset(data), batch_size=2**10, shuffle=False, num_workers=1, persistent_workers=True
+    )
+
+    loss = trainer.validate(model, dataloaders=test_dataloader, verbose=False)[0]["val_rmse"]
+
+    return loss
+
+def _compute_rmse(model, train_data, test_data, user_ids=None, item_ids=None):
 
     trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
 
@@ -358,6 +368,29 @@ if __name__ == "__main__":
             ids=item_ids,
         )
 
+    val_ratio = 0.1
+
+    known_users = user_ids[: (len(user_ids) - int(len(user_ids) * val_ratio))]
+    unknown_users = user_ids[(len(user_ids) - int(len(user_ids) * val_ratio)) :]
+    known_items = item_ids[: (len(item_ids) - int(len(item_ids) * val_ratio))]
+    unknown_items = item_ids[(len(item_ids) - int(len(item_ids) * val_ratio)) :]
+
+    test_data_ui = test_data_og[
+        test_data_og["user_id"].isin(known_users) & test_data_og["item_id"].isin(known_items)
+    ].reset_index(drop=True)
+
+    test_data_un = test_data_og[
+        test_data_og["user_id"].isin(known_users) & test_data_og["item_id"].isin(unknown_items)
+    ].reset_index(drop=True)
+
+    test_data_ni = test_data_og[
+        test_data_og["user_id"].isin(unknown_users) & test_data_og["item_id"].isin(known_items)
+    ].reset_index(drop=True)
+
+    test_data_nn = test_data_og[
+        test_data_og["user_id"].isin(unknown_users) & test_data_og["item_id"].isin(unknown_items)
+    ].reset_index(drop=True)
+    
     #############################
     # 1. ORIGINAL EMBEDDINGS
     #############################
@@ -365,10 +398,18 @@ if __name__ == "__main__":
     # Get the RSME of the original embeddings (in the original and target dims)
 
     print(f"Original Embeddings (dim={ORIGIN_DIM})")
-    compute_rmse(model_original, train_data_og, test_data_og)
+    print(f"\t All: {compute_rmse(model_original, test_data_og):.3f}")
+    print(f"\t U, I known: {compute_rmse(model_original, test_data_ui):.3f}")
+    print(f"\t U known, I unknown: {compute_rmse(model_original, test_data_un):.3f}")
+    print(f"\t U unknown, I known: {compute_rmse(model_original, test_data_ni):.3f}")
+    print(f"\t U, I unknown: {compute_rmse(model_original, test_data_nn):.3f}")
 
     print(f"Original Embeddings (dim={TARGET_DIM})")
-    compute_rmse(model_target, train_data_tg, test_data_tg)
+    print(f"\t All: {compute_rmse(model_target, test_data_og):.3f}")
+    print(f"\t U, I known: {compute_rmse(model_target, test_data_ui):.3f}")
+    print(f"\t U known, I unknown: {compute_rmse(model_target, test_data_un):.3f}")
+    print(f"\t U unknown, I known: {compute_rmse(model_target, test_data_ni):.3f}")
+    print(f"\t U, I unknown: {compute_rmse(model_target, test_data_nn):.3f}")
 
     #############################
     # 3. COMPRESSED EMBEDDINGS
@@ -386,4 +427,9 @@ if __name__ == "__main__":
     )
 
     print(f"Compressed Embeddings (dim={ORIGIN_DIM} -> {TARGET_DIM})")
-    compute_rmse(model_original, train_data_og, test_data_og, user_ids=user_ids, item_ids=item_ids)
+    print(f"\t All: {compute_rmse(model_original, test_data_og):.3f}")
+    print(f"\t U, I known: {compute_rmse(model_original, test_data_ui):.3f}")
+    print(f"\t U known, I unknown: {compute_rmse(model_original, test_data_un):.3f}")
+    print(f"\t U unknown, I known: {compute_rmse(model_original, test_data_ni):.3f}")
+    print(f"\t U, I unknown: {compute_rmse(model_original, test_data_nn):.3f}")
+    
