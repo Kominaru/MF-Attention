@@ -7,11 +7,10 @@ import torchmetrics
 from networks import LinkedAutoencoder
 from dds import DynamicDataSelectionHard2, DynamicDataSelectionHard2v2
 
+
 class EmbeddingCompressor(LightningModule):
 
-    def __init__(
-        self, d: int, features_to_select: int, lr: float = 1e-3, l2_reg: float = 0.0
-    ):
+    def __init__(self, d: int, features_to_select: int, lr: float = 1e-3, l2_reg: float = 0.0):
         super().__init__()
 
         self.lr = lr
@@ -23,6 +22,9 @@ class EmbeddingCompressor(LightningModule):
         self.dynamic_data_selection = DynamicDataSelectionHard2v2(features_to_select)
 
         self.decoder = LinkedAutoencoder(d)
+
+        self.save_hyperparameters()
+
         self.last_val_loss = float("inf")
 
         self.val_outputs = []
@@ -45,11 +47,11 @@ class EmbeddingCompressor(LightningModule):
             l2_reg += torch.square(param).sum()
         for param in self.decoder.parameters():
             l2_reg += torch.square(param).sum()
-        
+
         l2_reg = self.l2_reg * l2_reg / x.shape[0]
 
         return x, l2_reg
-    
+
     def forward(self, x):
         return self._forward(x)[0]
 
@@ -65,7 +67,7 @@ class EmbeddingCompressor(LightningModule):
 
         return loss
 
-    def validation_step(self, batch, batch_idx , dataloader_idx=None):
+    def validation_step(self, batch, batch_idx, dataloader_idx=None):
         x = batch
         x_hat = self(x)
         loss = nn.MSELoss()(x_hat, x)
@@ -73,7 +75,9 @@ class EmbeddingCompressor(LightningModule):
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=True)
         self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
 
-        if (self.current_epoch < 500 and self.current_epoch % 50 == 0) or (self.current_epoch >= 500 and self.current_epoch % 250 == 0):
+        if (self.current_epoch < 500 and self.current_epoch % 50 == 0) or (
+            self.current_epoch >= 500 and self.current_epoch % 250 == 0
+        ):
             self.val_outputs.append(x_hat)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):
@@ -81,7 +85,7 @@ class EmbeddingCompressor(LightningModule):
         x_hat = self(x)
 
         return x_hat
-    
+
     def on_validation_epoch_end(self):
         self.last_val_loss = self.trainer.callback_metrics["val_loss"].item()
 
@@ -89,4 +93,3 @@ class EmbeddingCompressor(LightningModule):
         optimizer = optim.AdamW(self.parameters(), lr=self.lr)
 
         return optimizer
-

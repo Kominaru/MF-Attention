@@ -1,4 +1,6 @@
+from datetime import timedelta
 import logging
+import os
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
@@ -16,19 +18,21 @@ logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING
 ORIGIN_DIM = 512
 TARGET_DIM = 32
 MODE = "tune"
-DATASET = "ml-1m"
+DATASET = "ml-25m"
 SPLIT = 1
+
 
 def compute_rmse(model, data):
     trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
 
     test_dataloader = torch.utils.data.DataLoader(
-        DyadicRegressionDataset(data), batch_size=2**10, shuffle=False, num_workers=1, persistent_workers=True
+        DyadicRegressionDataset(data), batch_size=2**10, shuffle=False, num_workers=4, persistent_workers=False
     )
 
     loss = trainer.validate(model, dataloaders=test_dataloader, verbose=False)[0]["val_rmse"]
 
     return loss
+
 
 def _compute_rmse(model, train_data, test_data, user_ids=None, item_ids=None):
 
@@ -190,18 +194,37 @@ def train_compressor(
         split=SPLIT,
     )
 
+    if os.path.exists(f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{side}.ckpt"):
+        os.remove(f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{side}.ckpt")
+
+    checkpointer = pl.callbacks.ModelCheckpoint(
+        dirpath=f"models/compressor/checkpoints/{DATASET}",
+        filename=f"best-model-{origin_dim}-{target_dim}-{side}",
+        monitor="val_loss/dataloader_idx_1" if len(cf_val_data_unknown) > 0 else "val_loss",
+        mode="min",
+        train_time_interval=timedelta(minutes=5),
+    )
+
+    early_stopper = pl.callbacks.EarlyStopping(
+        monitor="val_loss/dataloader_idx_1",
+        patience=500,
+        mode="min",
+        min_delta=1e-7,
+    )
+
     trainer = pl.Trainer(
         gpus=1,
         enable_progress_bar=not is_tuning,
-        max_time="00:00:45:00",
-        enable_checkpointing=False,
+        max_time="00:03:00:00",
         logger=False,
         enable_model_summary=False,
-        callbacks=[val_cf_callback],
+        callbacks=[val_cf_callback, checkpointer, early_stopper],
         num_sanity_val_steps=-1,
     )
 
     trainer.fit(compressor, data_module)
+
+    compressor = EmbeddingCompressor.load_from_checkpoint(checkpointer.best_model_path)
 
     predicts = trainer.predict(compressor, dataloaders=data_module.val_dataloader())
     # Concat the predictions from various dataloaders
@@ -351,7 +374,7 @@ if __name__ == "__main__":
             user_embeddings,
             ORIGIN_DIM,
             TARGET_DIM,
-            1e-4,
+            5e-4,
             0,
             cf_model=copy.deepcopy(model_original),
             cf_val_data=test_data_og,
@@ -362,7 +385,7 @@ if __name__ == "__main__":
             item_embeddings,
             ORIGIN_DIM,
             TARGET_DIM,
-            1e-4,
+            5e-4,
             0,
             cf_model=copy.deepcopy(model_original),
             cf_val_data=test_data_og,
@@ -392,7 +415,7 @@ if __name__ == "__main__":
     test_data_nn = test_data_og[
         test_data_og["user_id"].isin(unknown_users) & test_data_og["item_id"].isin(unknown_items)
     ].reset_index(drop=True)
-    
+
     #############################
     # 1. ORIGINAL EMBEDDINGS
     #############################
@@ -434,4 +457,3 @@ if __name__ == "__main__":
     print(f"\t U known, I unknown: {compute_rmse(model_original, test_data_un):.3f}")
     print(f"\t U unknown, I known: {compute_rmse(model_original, test_data_ni):.3f}")
     print(f"\t U, I unknown: {compute_rmse(model_original, test_data_nn):.3f}")
-    
