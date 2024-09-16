@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 from os import path
 from bayes_opt import BayesianOptimization
 import torch
-from collaborativefiltering_mf import CollaborativeFilteringModel
+from mf.collaborativefiltering_mf import CollaborativeFilteringModel
 from dataset import DyadicRegressionDataModule
 from argparse import ArgumentParser
 

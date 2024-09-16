@@ -5,11 +5,11 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-from model import EmbeddingCompressor
-from collaborativefiltering_mf import CollaborativeFilteringModel
+from compressor.embedding_compressor import EmbeddingCompressor
+from mf.collaborativefiltering_mf import CollaborativeFilteringModel
 from dataset import EmbeddingDataModule, DyadicRegressionDataset, EmbeddingDataModuleSimultaneous
 import pytorch_lightning as pl
-from callbacks import CFValidationCallback
+from compressor.cf_validation_callback import CFValidationCallback
 import copy
 
 logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
@@ -214,7 +214,7 @@ def train_compressor(
     trainer = pl.Trainer(
         gpus=1,
         enable_progress_bar=not is_tuning,
-        max_time="00:10:00:00",
+        max_time="00:01:00:00",
         logger=False,
         enable_model_summary=False,
         callbacks=[val_cf_callback, checkpointer],
