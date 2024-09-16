@@ -1,16 +1,16 @@
 from datetime import timedelta
 import logging
+import copy
 import os
-from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import pytorch_lightning as pl
+
 from compressor.embedding_compressor import EmbeddingCompressor
+from compressor.cf_validation_callback import CFValidationCallback
 from mf.collaborativefiltering_mf import CollaborativeFilteringModel
 from dataset import EmbeddingDataModule, DyadicRegressionDataset
-import pytorch_lightning as pl
-from compressor.cf_validation_callback import CFValidationCallback
-import copy
 
 logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
 logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
@@ -41,7 +41,6 @@ def train_compressor(
     target_dim=None,
     lr=1e-4,
     l2_reg=1e-4,
-    is_tuning=False,
     cf_model=None,
     cf_val_data=None,
     side="user",
@@ -54,17 +53,23 @@ def train_compressor(
 
     compressor = EmbeddingCompressor(origin_dim, target_dim, lr=lr, l2_reg=l2_reg)
 
+    # Split the CF validation data into reviews from users that will be used to train the compressor
+    # and reviews from users that will not be used to train the compressor
     val_percent = 0.1
 
     ids_known = ids[: (len(ids) - int(len(ids) * val_percent))]
     ids_unknown = ids[(len(ids) - int(len(ids) * val_percent)) :]
 
-    print(f"Known: {len(ids_known)}, Unknown: {len(ids_unknown)}")
-
     cf_val_data_known = cf_val_data[cf_val_data[side + "_id"].isin(ids_known)].reset_index(drop=True)
     cf_val_data_unknown = cf_val_data[cf_val_data[side + "_id"].isin(ids_unknown)].reset_index(drop=True)
 
-    print(f"Known: {len(cf_val_data_known)}, Unknown: {len(cf_val_data_unknown)}")
+    print(
+        f"Training {side} compressor with {len(ids_known)} embeddings and testing with {len(ids_unknown)} embeddings"
+    )
+
+    print(
+        f"Testing CF with {len(cf_val_data_known)} reviews from {side}s with trained embedding compression and {len(cf_val_data_unknown)} reviews from {side}s with non-trained embedding compression"
+    )
 
     dataloader_known = torch.utils.data.DataLoader(
         DyadicRegressionDataset(cf_val_data_known),
@@ -118,7 +123,6 @@ def train_compressor(
 
     trainer = pl.Trainer(
         gpus=1,
-        enable_progress_bar=not is_tuning,
         max_time=TRAINING_TIME,
         logger=False,
         enable_model_summary=False,

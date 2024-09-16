@@ -3,6 +3,7 @@ from torch import nn
 import torch
 from torch.nn import functional as F
 
+
 class LinkedAutoencoder(nn.Module):
 
     def __init__(self, d: int):
@@ -15,21 +16,16 @@ class LinkedAutoencoder(nn.Module):
         self.bn1 = nn.BatchNorm1d(d // 2)
 
         self.linear2 = nn.Linear(d // 2, d // 4)
-        # self.bn2 = nn.BatchNorm1d(d // 4)
-
-        # self.linear3 = nn.Linear(d // 4, d // 8)
-
-        # self.linear4 = nn.Linear(d // 8, d // 4)
 
         self.linear5 = nn.Linear(d // 4, d // 2)
 
         self.linear6 = nn.Linear(d // 2, d)
 
-        # self.linear = nn.Linear(d, d)
-        # self.bn = nn.BatchNorm1d(d)
-        # self.linear2 = nn.Linear(d, d)
-        # self.bn2 = nn.BatchNorm1d(d)
-        # self.linear3 = nn.Linear(d, d)
+        # Xaiver initialization
+        nn.init.xavier_uniform_(self.linear1.weight)
+        nn.init.xavier_uniform_(self.linear2.weight)
+        nn.init.xavier_uniform_(self.linear5.weight)
+        nn.init.xavier_uniform_(self.linear6.weight)
 
     def forward(self, x):
 
@@ -38,35 +34,11 @@ class LinkedAutoencoder(nn.Module):
         x1 = self.gelu(x1)
 
         x2 = self.linear2(x1)
-        # x2 = self.bn2(x2)
-        # x2 = self.gelu(x2)
-
-        # x3 = self.linear3(x2)
-
-        # x4 = self.linear4(x3)
-        # x4 += x2
-        # x4 = self.gelu(x4)
-
         x5 = self.linear5(x2)
 
-        # x5 = self.linear5(x4)
         x5 += x1
         x5 = self.gelu(x5)
 
         x6 = self.linear6(x5)
 
-        # x1 = self.linear(x)
-        # x1 = self.bn(x1)
-        # x1 = self.gelu(x1)
-
-        # x2 = self.linear2(x1)
-        # x2 = self.bn2(x2)
-        # x2 = self.gelu(x2)
-
-        # x3 = self.linear3(x2)
-        
-        # return x3
-
         return x6
-
-
