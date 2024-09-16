@@ -92,14 +92,14 @@ class CFValidationCallback(pl.callbacks.Callback):
         # plt.plot(self.state["epoch"], self.state["val_cf_rmse"])
         if len(self.state["val_cf_rmse_known"]) > 0:
             plt.plot(
-                self.state["epoch"][15:],
-                self.state["val_cf_rmse_known"][15:],
+                self.state["epoch"],
+                self.state["val_cf_rmse_known"],
                 label=f"Known {self.side}s",
                 color="red",
             )
             plt.plot(
-                self.state["epoch"][15:],
-                self.state["val_cf_rmse_unknown"][15:],
+                self.state["epoch"],
+                self.state["val_cf_rmse_unknown"],
                 label=f"Unknown {self.side}s",
                 color="blue",
             )

@@ -21,9 +21,9 @@ saved_datamodule = None
 USE_BIASES = False
 ACTIVATION = "sigmoid"
 SIGMOID_SCALE = 1.0
-EMBEDDING_DIM = 512
-SPLIT = 1
-DATASET = "ml-1m"
+EMBEDDING_DIM = 32
+SPLIT = 2
+DATASET = "ml-25m"
 
 # Create command line arguments for embedding dimension, dataset, and split
 
@@ -119,8 +119,8 @@ def train_MF(
         callbacks=callbacks,
         logger=False,
         precision=16,
-        enable_model_summary=verbose,
-        enable_progress_bar=verbose,
+        enable_model_summary=True,
+        enable_progress_bar=True,
         max_epochs=500,
     )
 

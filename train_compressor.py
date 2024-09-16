@@ -19,7 +19,7 @@ ORIGIN_DIM = 512
 TARGET_DIM = 32
 MODE = "tune"
 DATASET = "ml-25m"
-SPLIT = 1
+SPLIT = 3
 
 
 def compute_rmse(model, data):
@@ -205,20 +205,19 @@ def train_compressor(
         train_time_interval=timedelta(minutes=5),
     )
 
-    early_stopper = pl.callbacks.EarlyStopping(
-        monitor="val_loss/dataloader_idx_1",
-        patience=500,
-        mode="min",
-        min_delta=1e-7,
-    )
+    # early_stopper = pl.callbacks.EarlyStopping(
+    #     monitor="val_loss/dataloader_idx_1",
+    #     patience=500,
+    #     mode="min",
+    # )
 
     trainer = pl.Trainer(
         gpus=1,
         enable_progress_bar=not is_tuning,
-        max_time="00:03:00:00",
+        max_time="00:10:00:00",
         logger=False,
         enable_model_summary=False,
-        callbacks=[val_cf_callback, checkpointer, early_stopper],
+        callbacks=[val_cf_callback, checkpointer],
         num_sanity_val_steps=-1,
     )
 
