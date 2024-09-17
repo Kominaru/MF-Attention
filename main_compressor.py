@@ -43,32 +43,22 @@ def train_compressor(
     l2_reg=1e-4,
     cf_model=None,
     cf_val_data=None,
-    side="user",
-    ids=None,
 ):
-
-    data_module = EmbeddingDataModule(
-        embeddings, ids=ids, batch_size=2**12 if side == "user" else 2**12, num_workers=4
-    )
 
     compressor = EmbeddingCompressor(origin_dim, target_dim, lr=lr, l2_reg=l2_reg)
 
     # Split the CF validation data into reviews from users that will be used to train the compressor
     # and reviews from users that will not be used to train the compressor
-    val_percent = 0.1
 
-    ids_known = ids[: (len(ids) - int(len(ids) * val_percent))]
-    ids_unknown = ids[(len(ids) - int(len(ids) * val_percent)) :]
-
-    cf_val_data_known = cf_val_data[cf_val_data[side + "_id"].isin(ids_known)].reset_index(drop=True)
-    cf_val_data_unknown = cf_val_data[cf_val_data[side + "_id"].isin(ids_unknown)].reset_index(drop=True)
-
-    print(
-        f"Training {side} compressor with {len(ids_known)} embeddings and testing with {len(ids_unknown)} embeddings"
-    )
+    cf_val_data_known = cf_val_data[
+        cf_val_data[embeddings.entity_type + "_id"].isin(embeddings.dataset_train.ids)
+    ].reset_index(drop=True)
+    cf_val_data_unknown = cf_val_data[
+        cf_val_data[embeddings.entity_type + "_id"].isin(embeddings.dataset_val.ids)
+    ].reset_index(drop=True)
 
     print(
-        f"Testing CF with {len(cf_val_data_known)} reviews from {side}s with trained embedding compression and {len(cf_val_data_unknown)} reviews from {side}s with non-trained embedding compression"
+        f"Testing CF with {len(cf_val_data_known)} reviews from {embeddings.entity_type}s with trained embedding compression and {len(cf_val_data_unknown)} reviews from {embeddings.entity_type}s with non-trained embedding compression"
     )
 
     dataloader_known = torch.utils.data.DataLoader(
@@ -94,18 +84,21 @@ def train_compressor(
         validation_dataloaders=(
             [dataloader_known, dataloader_unknown] if len(cf_val_data_unknown) > 0 else [dataloader_known]
         ),
-        side=side,
-        ids=ids,
+        embeddings_datamodule=embeddings,
         dataset=DATASET,
         split=SPLIT,
     )
 
-    if os.path.exists(f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{side}.ckpt"):
-        os.remove(f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{side}.ckpt")
+    if os.path.exists(
+        f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{embeddings.entity_type}.ckpt"
+    ):
+        os.remove(
+            f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{embeddings.entity_type}.ckpt"
+        )
 
     checkpointer = pl.callbacks.ModelCheckpoint(
         dirpath=f"models/compressor/checkpoints/{DATASET}",
-        filename=f"best-model-{origin_dim}-{target_dim}-{side}",
+        filename=f"best-model-{origin_dim}-{target_dim}-{embeddings.entity_type}",
         monitor="val_loss/dataloader_idx_1" if len(cf_val_data_unknown) > 0 else "val_loss",
         mode="min",
         train_time_interval=timedelta(minutes=5),
@@ -130,11 +123,11 @@ def train_compressor(
         num_sanity_val_steps=-1,
     )
 
-    trainer.fit(compressor, data_module)
+    trainer.fit(compressor, embeddings)
 
     compressor = EmbeddingCompressor.load_from_checkpoint(checkpointer.best_model_path)
 
-    predicts = trainer.predict(compressor, dataloaders=data_module.val_dataloader())
+    predicts = trainer.predict(compressor, dataloaders=embeddings.val_dataloader())
     # Concat the predictions from various dataloaders
     if len(predicts) == 2:
         for i in range(len(predicts)):
@@ -169,39 +162,38 @@ if __name__ == "__main__":
         train_data_tg = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
         test_data_tg = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
 
-    user_ids = np.union1d(train_data_og["user_id"].unique(), test_data_og["user_id"].unique())
-    item_ids = np.union1d(train_data_og["item_id"].unique(), test_data_og["item_id"].unique())
+    user_embedding_datamodule = EmbeddingDataModule(
+        user_embeddings, data=[train_data_og, test_data_og], batch_size=2**12, num_workers=4, entity_type="user"
+    )
 
-    np.random.shuffle(user_ids)
-    np.random.shuffle(item_ids)
-
-    user_embeddings = user_embeddings[user_ids]
-    item_embeddings = item_embeddings[item_ids]
+    item_embedding_datamodule = EmbeddingDataModule(
+        item_embeddings, data=[train_data_og, test_data_og], batch_size=2**12, num_workers=4, entity_type="item"
+    )
 
     compressed_user_embeddings = train_compressor(
-        embeddings=user_embeddings,
+        embeddings=user_embedding_datamodule,
         origin_dim=ORIGIN_DIM,
         target_dim=TARGET_DIM,
         lr=5e-4,
         l2_reg=0,
         cf_model=copy.deepcopy(model_original),
         cf_val_data=test_data_og,
-        side="user",
-        ids=user_ids,
     )
+
     compressed_item_embeddings = train_compressor(
-        embeddings=item_embeddings,
+        embeddings=item_embedding_datamodule,
         origin_dim=ORIGIN_DIM,
         target_dim=TARGET_DIM,
         lr=5e-4,
         l2_reg=0,
         cf_model=copy.deepcopy(model_original),
         cf_val_data=test_data_og,
-        side="item",
-        ids=item_ids,
     )
 
     val_ratio = 0.1
+
+    user_ids = user_embedding_datamodule.id_order
+    item_ids = item_embedding_datamodule.id_order
 
     known_users = user_ids[: (len(user_ids) - int(len(user_ids) * val_ratio))]
     unknown_users = user_ids[(len(user_ids) - int(len(user_ids) * val_ratio)) :]

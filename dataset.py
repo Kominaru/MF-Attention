@@ -1,3 +1,4 @@
+from typing import Literal, Union
 import numpy as np
 import pandas as pd
 from torch.utils.data import Dataset, DataLoader
@@ -113,13 +114,14 @@ class EmbeddingDataset(Dataset):
     Dataset for embedding compression and reconstruction.
     """
 
-    def __init__(self, embeddings):
+    def __init__(self, embeddings, ids):
         """
         Args:
             embeddings (np.ndarray): Embeddings to be compressed
         """
 
         self.embeddings = embeddings
+        self.ids = ids
 
     def __len__(self):
         """
@@ -239,40 +241,69 @@ class DyadicRegressionDataModule(LightningDataModule):
 
 
 class EmbeddingDataModule(LightningDataModule):
-    def __init__(self, embeddings, ids, batch_size=64, num_workers=0):
+    """
+    Attributes:
+            embeddings (np.ndarray): Embeddings to be compressed
+            batch_size (int): Batch size
+            num_workers (int): Number of workers for the DataLoader
+            entity_type (Literal["user", "item"]): Type of entity ("user" or "item")
+            dataset_train (EmbeddingDataset): Training dataset
+            dataset_val (EmbeddingDataset): Validation dataset
+            num_features (int): Number of features in the embeddings
+    """
+
+    def __init__(
+        self,
+        embeddings: np.ndarray = None,
+        data: Union[pd.DataFrame, list[pd.DataFrame]] = None,
+        batch_size: int = 2**10,
+        num_workers: int = 0,
+        entity_type: Literal["user", "item"] = "user",
+        val_percent: float = 0.1,
+    ):
         """
         Creates a datamodule for embedding compression and reconstruction.
 
         Args:
             embeddings (np.ndarray): Embeddings to be compressed
+            data (Union[pd.DataFrame, List[pd.DataFrame]]): Dataframe(s) containing the dataset reviews
             batch_size (int): Batch size
             num_workers (int): Number of workers for the DataLoader
+            entity_type (str): Type of entity (e.g., "user", "item")
+            val_percent (float): Percentage of embeddings to be used for validation
         """
         super().__init__()
         self.embeddings = embeddings
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.ids = ids
+        self.entity_type = entity_type
+        self.num_features = embeddings.shape[1]
 
-        self.val_percentage = 0.1
+        if isinstance(data, pd.DataFrame):  # Obtain all the IDs (users or items) from the data
+            data = [data]
 
-        self.known_embeddings = self.embeddings[: ids.shape[0] - int(ids.shape[0] * self.val_percentage)]
-        self.unknown_embeddings = self.embeddings[ids.shape[0] - int(ids.shape[0] * self.val_percentage) :]
+        unique_ids = pd.concat([df[f"{entity_type}_id"] for df in data]).unique()
+        np.random.shuffle(unique_ids)
 
-        self.dataset_known = EmbeddingDataset(self.known_embeddings)
-        self.dataset_unknown = EmbeddingDataset(self.unknown_embeddings)
+        self.embeddings = self.embeddings[unique_ids]  # Randomize the embedding order and select only
+        self.id_order = unique_ids  # the embeddings for the unique IDs found in the data
+
+        num_train = len(unique_ids) - int(len(unique_ids) * val_percent)
+
+        self.dataset_train = EmbeddingDataset(self.embeddings[:num_train], unique_ids[:num_train])
+        self.dataset_val = EmbeddingDataset(self.embeddings[num_train:], unique_ids[num_train:])
 
         print(f"Total embeddings: {len(self.embeddings)}")
-        print(f"Known embeddings: {len(self.dataset_known)}")
-        print(f"Unknown embeddings: {len(self.dataset_unknown)}")
+        print(f"Train embeddings: {len(self.dataset_train)}")
+        print(f"Val embeddings: {len(self.dataset_val)}")
 
     def train_dataloader(self):
         """
         Returns:
-            torch.utils.data.DataLoader: DataLoader for the training set
+            torch.utils.data.DataLoader: Training DataLoader
         """
         return DataLoader(
-            self.dataset_known,
+            self.dataset_train,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
@@ -282,26 +313,26 @@ class EmbeddingDataModule(LightningDataModule):
     def val_dataloader(self):
         """
         Returns:
-            torch.utils.data.DataLoader: DataLoader for the validation set (same as test set)
+            torch.utils.data.DataLoader: Validation DataLoader. Returns two dataloaders if the dataset is split into train and val.
         """
 
-        dataloader_known = DataLoader(
-            self.dataset_known,
+        dataloader_train = DataLoader(
+            self.dataset_train,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             persistent_workers=True,
             shuffle=False,
         )
 
-        if len(self.dataset_unknown) > 0:
-            dataloader_unknown = DataLoader(
-                self.dataset_unknown,
+        if len(self.dataset_val) > 0:
+            dataloader_val = DataLoader(
+                self.dataset_val,
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 persistent_workers=True,
                 shuffle=False,
             )
 
-            return dataloader_known, dataloader_unknown
+            return dataloader_train, dataloader_val
 
-        return dataloader_known
+        return dataloader_train

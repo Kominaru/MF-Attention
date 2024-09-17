@@ -8,11 +8,10 @@ DATASET_RANGES = {"ml-1m": (0.835, 0.860), "ml-10m": (0.765, 0.790), "ml-25m": (
 
 
 class CFValidationCallback(pl.callbacks.Callback):
-    def __init__(self, cf_model, validation_dataloaders, side="user", ids=None, dataset=None, split=None):
+    def __init__(self, cf_model, validation_dataloaders, embeddings_datamodule=None, dataset=None, split=None):
         super().__init__()
         self.cf_model = cf_model
         self.val_dataloader = validation_dataloaders
-        self.side = side
         self.state = {
             "val_cf_rmse_known": [],
             "val_cf_rmse_unknown": [],
@@ -21,9 +20,9 @@ class CFValidationCallback(pl.callbacks.Callback):
             "known_loss": [],
             "unknown_loss": [],
         }
-        self.ids = ids
         self.dataset = dataset
         self.split = split
+        self.embeddings_datamodule = embeddings_datamodule
 
     def on_validation_epoch_end(self, trainer, pl_module):
 
@@ -42,10 +41,10 @@ class CFValidationCallback(pl.callbacks.Callback):
         # Expand dims on the first axis to match the embedding shape
         # print(self.ids.shape, validation_outputs.shape)
 
-        if self.side == "user":
-            self.cf_model.user_embedding.weight.data[self.ids] = validation_outputs.cpu()
+        if self.embeddings_datamodule.entity_type == "user":
+            self.cf_model.user_embedding.weight.data[self.embeddings_datamodule.id_order] = validation_outputs.cpu()
         else:
-            self.cf_model.item_embedding.weight.data[self.ids] = validation_outputs.cpu()
+            self.cf_model.item_embedding.weight.data[self.embeddings_datamodule.id_order] = validation_outputs.cpu()
 
         trainer_cf = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
         cf_model_validation_losses = trainer_cf.validate(self.cf_model, dataloaders=self.val_dataloader, verbose=False)
