@@ -37,7 +37,6 @@ def compute_rmse(model, data):
 
 def train_compressor(
     embeddings=None,
-    origin_dim=None,
     target_dim=None,
     lr=1e-4,
     l2_reg=1e-4,
@@ -45,7 +44,7 @@ def train_compressor(
     cf_val_data=None,
 ):
 
-    compressor = EmbeddingCompressor(origin_dim, target_dim, lr=lr, l2_reg=l2_reg)
+    compressor = EmbeddingCompressor(embeddings.num_features, target_dim, lr=lr, l2_reg=l2_reg)
 
     # Split the CF validation data into reviews from users that will be used to train the compressor
     # and reviews from users that will not be used to train the compressor
@@ -90,15 +89,15 @@ def train_compressor(
     )
 
     if os.path.exists(
-        f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{embeddings.entity_type}.ckpt"
+        f"models/compressor/checkpoints/{DATASET}/best-model-{embeddings.num_features}-{target_dim}-{embeddings.entity_type}.ckpt"
     ):
         os.remove(
-            f"models/compressor/checkpoints/{DATASET}/best-model-{origin_dim}-{target_dim}-{embeddings.entity_type}.ckpt"
+            f"models/compressor/checkpoints/{DATASET}/best-model-{embeddings.num_features}-{target_dim}-{embeddings.entity_type}.ckpt"
         )
 
     checkpointer = pl.callbacks.ModelCheckpoint(
         dirpath=f"models/compressor/checkpoints/{DATASET}",
-        filename=f"best-model-{origin_dim}-{target_dim}-{embeddings.entity_type}",
+        filename=f"best-model-{embeddings.num_features}-{target_dim}-{embeddings.entity_type}",
         monitor="val_loss/dataloader_idx_1" if len(cf_val_data_unknown) > 0 else "val_loss",
         mode="min",
         train_time_interval=timedelta(minutes=5),
@@ -172,7 +171,6 @@ if __name__ == "__main__":
 
     compressed_user_embeddings = train_compressor(
         embeddings=user_embedding_datamodule,
-        origin_dim=ORIGIN_DIM,
         target_dim=TARGET_DIM,
         lr=5e-4,
         l2_reg=0,
@@ -182,7 +180,6 @@ if __name__ == "__main__":
 
     compressed_item_embeddings = train_compressor(
         embeddings=item_embedding_datamodule,
-        origin_dim=ORIGIN_DIM,
         target_dim=TARGET_DIM,
         lr=5e-4,
         l2_reg=0,
