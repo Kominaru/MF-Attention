@@ -3,9 +3,8 @@ from pytorch_lightning import LightningModule
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchmetrics
 from compressor.linked_autoencoder import LinkedAutoencoder
-from compressor.dds import DynamicDataSelectionHard2, DynamicDataSelectionHard2v2
+from compressor.dds import DynamicDataSelectionHard2v2
 
 
 class EmbeddingCompressor(LightningModule):
