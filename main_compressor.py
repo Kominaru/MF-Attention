@@ -173,11 +173,11 @@ if __name__ == "__main__":
         cf_val_datamodule=cf_test_data,
     )
 
-    trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
-
-    losses = trainer.validate(model_original, dataloaders=cf_test_data.val_dataloader("both"))
-
     def print_rmse(model):
+
+        trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
+        losses = trainer.validate(model_original, dataloaders=cf_test_data.val_dataloader("both"), verbose=False)
+
         print(f"\t All: {losses[0]['val_rmse']:.6f}")
         print(f"\t U trained, I trained: {losses[0]['val_rmse/dataloader_idx_0']:.6f}")
         print(f"\t U trained, I untrained: {losses[1]['val_rmse/dataloader_idx_1']:.6f}")
