@@ -58,15 +58,15 @@ def train_compressor(
     )
 
     if os.path.exists(
-        f"models/compressor/checkpoints/{DATASET}/best-model-{embeddings.num_features}-{target_dim}-{embeddings.entity_type}.ckpt"
+        f"models/compressor/checkpoints/{DATASET}/{embeddings.entity_type}/best-model-{embeddings.num_features}-{target_dim}.ckpt"
     ):
         os.remove(
-            f"models/compressor/checkpoints/{DATASET}/best-model-{embeddings.num_features}-{target_dim}-{embeddings.entity_type}.ckpt"
+            f"models/compressor/checkpoints/{DATASET}/{embeddings.entity_type}/best-model-{embeddings.num_features}-{target_dim}.ckpt"
         )
 
     checkpointer = pl.callbacks.ModelCheckpoint(
-        dirpath=f"models/compressor/checkpoints/{DATASET}",
-        filename=f"best-model-{embeddings.num_features}-{target_dim}-{embeddings.entity_type}",
+        dirpath=f"models/compressor/checkpoints/{DATASET}/{embeddings.entity_type}",
+        filename=f"best-model-{embeddings.num_features}-{target_dim}",
         monitor="val_loss/dataloader_idx_1" if len(cf_val_datamodule.df_user_t) > 0 else "val_loss",
         mode="min",
         train_time_interval=timedelta(minutes=5),
@@ -117,12 +117,6 @@ if __name__ == "__main__":
     model_dir = f"models/MF/checkpoints/{DATASET}{f'/split{SPLIT}' if SPLIT else ''}"
     model_original = CollaborativeFilteringModel.load_from_checkpoint(f"{model_dir}/best-model-{ORIGIN_DIM}.ckpt")
     model_target = CollaborativeFilteringModel.load_from_checkpoint(f"{model_dir}/best-model-{TARGET_DIM}.ckpt")
-
-    # Delete the existing compressor models if they exist
-    if os.path.exists(f"models/compressor/checkpoints/{DATASET}/best-model-{ORIGIN_DIM}-{TARGET_DIM}-user.ckpt"):
-        os.remove(f"models/compressor/checkpoints/{DATASET}/best-model-{ORIGIN_DIM}-{TARGET_DIM}-user.ckpt")
-    if os.path.exists(f"models/compressor/checkpoints/{DATASET}/best-model-{ORIGIN_DIM}-{TARGET_DIM}-item.ckpt"):
-        os.remove(f"models/compressor/checkpoints/{DATASET}/best-model-{ORIGIN_DIM}-{TARGET_DIM}-item.ckpt")
 
     user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy()
     item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy()
@@ -176,7 +170,7 @@ if __name__ == "__main__":
     def print_rmse(model):
 
         trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
-        losses = trainer.validate(model_original, dataloaders=cf_test_data.val_dataloader("both"), verbose=False)
+        losses = trainer.validate(model, dataloaders=cf_test_data.val_dataloader("both"), verbose=False)
 
         print(f"\t All: {losses[0]['val_rmse']:.6f}")
         print(f"\t U trained, I trained: {losses[0]['val_rmse/dataloader_idx_0']:.6f}")
