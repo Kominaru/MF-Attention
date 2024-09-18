@@ -2,16 +2,14 @@ import torch
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 
-from dataset import DyadicRegressionDataset
-
 DATASET_RANGES = {"ml-1m": (0.835, 0.860), "ml-10m": (0.765, 0.790), "ml-25m": (0.740, 0.765)}
 
 
 class CFValidationCallback(pl.callbacks.Callback):
-    def __init__(self, cf_model, validation_dataloaders, embeddings_datamodule=None, dataset=None, split=None):
+    def __init__(self, cf_model, validation_datamodule, embeddings_datamodule=None, dataset=None, split=None):
         super().__init__()
         self.cf_model = cf_model
-        self.val_dataloader = validation_dataloaders
+        self.val_datamodule = validation_datamodule
         self.state = {
             "val_cf_rmse_known": [],
             "val_cf_rmse_unknown": [],
@@ -38,16 +36,17 @@ class CFValidationCallback(pl.callbacks.Callback):
         validation_outputs = pl_module.val_outputs
         validation_outputs = torch.cat(validation_outputs, dim=0)
 
-        # Expand dims on the first axis to match the embedding shape
-        # print(self.ids.shape, validation_outputs.shape)
-
         if self.embeddings_datamodule.entity_type == "user":
             self.cf_model.user_embedding.weight.data[self.embeddings_datamodule.id_order] = validation_outputs.cpu()
         else:
             self.cf_model.item_embedding.weight.data[self.embeddings_datamodule.id_order] = validation_outputs.cpu()
 
         trainer_cf = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
-        cf_model_validation_losses = trainer_cf.validate(self.cf_model, dataloaders=self.val_dataloader, verbose=False)
+        cf_model_validation_losses = trainer_cf.validate(
+            self.cf_model,
+            dataloaders=self.val_datamodule.val_dataloader(self.embeddings_datamodule.entity_type),
+            verbose=False,
+        )
 
         if len(cf_model_validation_losses) == 2:
 

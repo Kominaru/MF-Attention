@@ -293,9 +293,9 @@ class EmbeddingDataModule(LightningDataModule):
         self.dataset_train = EmbeddingDataset(self.embeddings[:num_train], unique_ids[:num_train])
         self.dataset_val = EmbeddingDataset(self.embeddings[num_train:], unique_ids[num_train:])
 
-        print(f"Total embeddings: {len(self.embeddings)}")
-        print(f"Train embeddings: {len(self.dataset_train)}")
-        print(f"Val embeddings: {len(self.dataset_val)}")
+        print(f"Creating Embedding dataset ({len(unique_ids)} {entity_type}s) to train compression")
+        print(f"  Training {entity_type}s:\t{num_train}")
+        print(f"  Validation {entity_type}s:\t{len(unique_ids) - num_train}\n")
 
     def train_dataloader(self):
         """
@@ -336,3 +336,154 @@ class EmbeddingDataModule(LightningDataModule):
             return dataloader_train, dataloader_val
 
         return dataloader_train
+
+
+class CompressorTestingCFDataModule(LightningDataModule):
+    """
+    DataModule for Dyadic Regression used to test an Embedding Compressor in its final CF task.
+
+    Splits the CF validation data into reviews from users/items that will be used to train the compressor
+    and reviews from users/items that will not be used to train the compressor.
+    """
+
+    def __init__(
+        self,
+        user_embeddings_datamodule: EmbeddingDataModule,
+        item_embeddings_datamodule: EmbeddingDataModule,
+        cf_val_data: pd.DataFrame,
+        batch_size: int = 2**10,
+        num_workers: int = 4,
+    ):
+        """
+        Args:
+            user_embeddings_datamodule (EmbeddingDataModule): User Embeddings in the CF task
+            item_embeddings_datamodule (EmbeddingDataModule): Item Embeddings in the CF task
+            cf_val_data (pd.DataFrame): Validation partition in the CF task
+            batch_size (int): Batch size
+            num_workers (int): Number of workers for the DataLoader
+        """
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+
+        self.val_data = cf_val_data
+
+        print(f"Splitting CF Val Data ({len(cf_val_data)} reviews) to test compressors...")
+
+        self.df_user_t = cf_val_data[
+            cf_val_data["user_id"].isin(user_embeddings_datamodule.dataset_train.ids)
+        ].reset_index(drop=True)
+        self.df_user_v = cf_val_data[
+            cf_val_data["user_id"].isin(user_embeddings_datamodule.dataset_val.ids)
+        ].reset_index(drop=True)
+        self.df_item_t = cf_val_data[
+            cf_val_data["item_id"].isin(item_embeddings_datamodule.dataset_train.ids)
+        ].reset_index(drop=True)
+        self.df_item_v = cf_val_data[
+            cf_val_data["item_id"].isin(item_embeddings_datamodule.dataset_val.ids)
+        ].reset_index(drop=True)
+
+        print(f"  from trained Users:\t{len(self.df_user_t)}")
+        print(f"  from untrained Users:\t{len(self.df_user_v)}")
+        print(f"  from trained Items:\t{len(self.df_item_t)}")
+        print(f"  from untrained Items:\t{len(self.df_item_v)}\n")
+
+    def val_dataloader(self, entity_type: Literal["user", "item", "both"]):
+        """
+        Args:
+            entity_type (Literal["user", "item", "both"]) : Specifies the type how to split the validation data and return the DataLoaders.
+
+        Returns:
+            (Union[Tuple[DataLoader, DataLoader], Tuple[DataLoader, DataLoader, DataLoader, DataLoader]]):
+                - If `entity_type` is "user" or "item", returns two DataLoaders:
+
+                    1. Reviews from users/items used in compressor training
+                    2. Reviews from users/items not used in compressor training
+
+                - If `entity_type` is "both", returns four DataLoaders:
+
+                    1. Reviews whose users and items are used in compressor training
+                    2. Reviews whose users are used in compressor training and items are not
+                    3. Reviews whose items are used in compressor training and users are not
+                    4. Reviews whose users and items are not used in compressor training
+        """
+
+        if entity_type == "user":
+            return DataLoader(
+                DyadicRegressionDataset(self.df_user_t),
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                shuffle=False,
+            ), DataLoader(
+                DyadicRegressionDataset(self.df_user_v),
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                shuffle=False,
+            )
+        elif entity_type == "item":
+            return DataLoader(
+                DyadicRegressionDataset(self.df_item_t),
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                shuffle=False,
+            ), DataLoader(
+                DyadicRegressionDataset(self.df_item_v),
+                batch_size=self.batch_size,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                shuffle=False,
+            )
+        else:
+            # Find the intersection of the users and items in the train and val datasets
+            df_both_t = self.df_user_t[self.df_user_t["item_id"].isin(self.df_item_t["item_id"])].reset_index(
+                drop=True
+            )
+            df_both_v = self.df_user_v[self.df_user_v["item_id"].isin(self.df_item_v["item_id"])].reset_index(
+                drop=True
+            )
+            df_user_t_item_v = self.df_user_t[self.df_user_t["item_id"].isin(self.df_item_v["item_id"])].reset_index(
+                drop=True
+            )
+            df_user_v_item_t = self.df_user_v[self.df_user_v["item_id"].isin(self.df_item_t["item_id"])].reset_index(
+                drop=True
+            )
+
+            print(f"Splitting CF Val Data ({len(self.val_data)} reviews) to test full compressors...")
+            print(f"  from trained Users and Items: {len(df_both_t)}")
+            print(f"  from trained Users and untrained Items: {len(df_user_t_item_v)}")
+            print(f"  from untrained Users and trained Items: {len(df_user_v_item_t)}")
+            print(f"  from untrained Users and Items: {len(df_both_v)}\n")
+
+            return (
+                DataLoader(
+                    DyadicRegressionDataset(df_both_t),
+                    batch_size=self.batch_size,
+                    num_workers=self.num_workers,
+                    persistent_workers=True,
+                    shuffle=False,
+                ),
+                DataLoader(
+                    DyadicRegressionDataset(df_user_t_item_v),
+                    batch_size=self.batch_size,
+                    num_workers=self.num_workers,
+                    persistent_workers=True,
+                    shuffle=False,
+                ),
+                DataLoader(
+                    DyadicRegressionDataset(df_user_v_item_t),
+                    batch_size=self.batch_size,
+                    num_workers=self.num_workers,
+                    persistent_workers=True,
+                    shuffle=False,
+                ),
+                DataLoader(
+                    DyadicRegressionDataset(df_both_v),
+                    batch_size=self.batch_size,
+                    num_workers=self.num_workers,
+                    persistent_workers=True,
+                    shuffle=False,
+                ),
+            )
