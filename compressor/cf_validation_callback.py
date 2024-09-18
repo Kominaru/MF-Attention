@@ -93,13 +93,13 @@ class CFValidationCallback(pl.callbacks.Callback):
             plt.plot(
                 self.state["epoch"],
                 self.state["val_cf_rmse_known"],
-                label=f"Known {self.side}s",
+                label=f"Known {self.embeddings_datamodule.entity_type}s",
                 color="red",
             )
             plt.plot(
                 self.state["epoch"],
                 self.state["val_cf_rmse_unknown"],
-                label=f"Unknown {self.side}s",
+                label=f"Unknown {self.embeddings_datamodule.entity_type}s",
                 color="blue",
             )
             # plt.plot(self.state["epoch"][15:], self.state["val_cf_rmse"][15:], label=f"All {self.side}s", color="purple")
@@ -130,10 +130,10 @@ class CFValidationCallback(pl.callbacks.Callback):
 
         plt.ylabel("Reconstruction Loss")
 
-        plt.title(f"Validation RMSE of the Compressed Model ({self.side})")
+        plt.title(f"Validation RMSE of the Compressed Model ({self.embeddings_datamodule.entity_type})")
         plt.legend(loc="upper right")
         plt.tight_layout()
         plt.savefig(
-            f"compressor_data/{self.dataset}/{self.side}_validation_rmse_{self.split if self.split is not None else ''}.pdf"
+            f"compressor_data/{self.dataset}/{self.embeddings_datamodule.entity_type}_validation_rmse_{self.split if self.split is not None else ''}.pdf"
         )
         plt.clf()

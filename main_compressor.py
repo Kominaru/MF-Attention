@@ -20,7 +20,7 @@ TARGET_DIM = 32
 DATASET = "ml-25m"
 SPLIT = 3
 DO_EARLY_STOPPING = False
-TRAINING_TIME = "00:01:00:00"  # "DD:HH:MM:SS"
+TRAINING_TIME = "00:02:00:00"  # "DD:HH:MM:SS"
 
 
 def compute_rmse(model, data):
