@@ -348,6 +348,8 @@ class CompressorTestingCFDataModule(LightningDataModule):
 
     def __init__(
         self,
+        dataset: str,
+        split: int,
         user_embeddings_datamodule: EmbeddingDataModule,
         item_embeddings_datamodule: EmbeddingDataModule,
         cf_val_data: pd.DataFrame,
@@ -356,6 +358,8 @@ class CompressorTestingCFDataModule(LightningDataModule):
     ):
         """
         Args:
+            dataset (str): Dataset name
+            split (int): Split number
             user_embeddings_datamodule (EmbeddingDataModule): User Embeddings in the CF task
             item_embeddings_datamodule (EmbeddingDataModule): Item Embeddings in the CF task
             cf_val_data (pd.DataFrame): Validation partition in the CF task
@@ -363,9 +367,11 @@ class CompressorTestingCFDataModule(LightningDataModule):
             num_workers (int): Number of workers for the DataLoader
         """
         super().__init__()
+
+        self.dataset = dataset
+        self.split = split
         self.batch_size = batch_size
         self.num_workers = num_workers
-
         self.val_data = cf_val_data
 
         print(f"Splitting CF Val Data ({len(cf_val_data)} reviews) to test compressors...")

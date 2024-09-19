@@ -10,7 +10,7 @@ import pytorch_lightning as pl
 from compressor.embedding_compressor import EmbeddingCompressor
 from compressor.cf_validation_callback import CFValidationCallback
 from mf.collaborativefiltering_mf import CollaborativeFilteringModel
-from dataset import EmbeddingDataModule, DyadicRegressionDataset, CompressorTestingCFDataModule
+from dataset import EmbeddingDataModule, CompressorTestingCFDataModule
 
 logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
 logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
@@ -20,20 +20,11 @@ TARGET_DIM = 32
 DATASET = "ml-25m"
 SPLIT = 5
 DO_EARLY_STOPPING = False
-TRAINING_TIME = "00:00:05:00"  # "DD:HH:MM:SS"
-
-
-def compute_rmse(model, dataloader):
-    trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
-
-    loss = trainer.validate(model, dataloaders=dataloader, verbose=False)[0]["val_rmse"]
-
-    return loss
+TRAINING_TIME = "00:00:15:00"  # "DD:HH:MM:SS"
 
 
 def train_compressor(
     embeddings=None,
-    target_dim=None,
     lr=1e-4,
     l2_reg=1e-4,
     cf_model=None,
@@ -42,7 +33,7 @@ def train_compressor(
 
     print(f"Training {embeddings.entity_type} compressor... (lr {lr} | l2_reg {l2_reg})")
 
-    compressor = EmbeddingCompressor(embeddings.num_features, target_dim, lr=lr, l2_reg=l2_reg)
+    compressor = EmbeddingCompressor(embeddings.num_features, TARGET_DIM, lr=lr, l2_reg=l2_reg)
 
     # Split the CF validation data into reviews from users that will be used to train the compressor
     # and reviews from users that will not be used to train the compressor
@@ -53,21 +44,16 @@ def train_compressor(
         cf_model=cf_model,
         validation_datamodule=cf_val_datamodule,
         embeddings_datamodule=embeddings,
-        dataset=DATASET,
-        split=SPLIT,
     )
 
-    if os.path.exists(
-        f"models/compressor/checkpoints/{DATASET}/{embeddings.entity_type}/best-model-{embeddings.num_features}-{target_dim}.ckpt"
-    ):
-        os.remove(
-            f"models/compressor/checkpoints/{DATASET}/{embeddings.entity_type}/best-model-{embeddings.num_features}-{target_dim}.ckpt"
-        )
+    checkpoint_dir = f"models/compressor/checkpoints/{DATASET}/{embeddings.entity_type}/best-model-{embeddings.num_features}-{TARGET_DIM}.ckpt"
+    if os.path.exists(checkpoint_dir):
+        os.remove(checkpoint_dir)
 
     checkpointer = pl.callbacks.ModelCheckpoint(
         dirpath=f"models/compressor/checkpoints/{DATASET}/{embeddings.entity_type}",
-        filename=f"best-model-{embeddings.num_features}-{target_dim}",
-        monitor="val_loss/dataloader_idx_1" if len(cf_val_datamodule.df_user_t) > 0 else "val_loss",
+        filename=f"best-model-{embeddings.num_features}-{TARGET_DIM}",
+        monitor="val_loss/dataloader_idx_1",
         mode="min",
         train_time_interval=timedelta(minutes=5),
     )
@@ -75,7 +61,7 @@ def train_compressor(
     if DO_EARLY_STOPPING:
         callbacks.append(
             pl.callbacks.EarlyStopping(
-                monitor=("val_loss/dataloader_idx_1" if len(cf_val_datamodule.df_user_t) > 0 else "val_loss"),
+                monitor="val_loss/dataloader_idx_1",
                 patience=5,
                 mode="min",
                 verbose=True,
@@ -96,11 +82,7 @@ def train_compressor(
     compressor = EmbeddingCompressor.load_from_checkpoint(checkpointer.best_model_path)
 
     predicts = trainer.predict(compressor, dataloaders=embeddings.val_dataloader())
-    # Concat the predictions from various dataloaders
-    if len(predicts) == 2:
-        for i in range(len(predicts)):
-            predicts[i] = np.concatenate(predicts[i], axis=0)
-    compressed_embeddings = np.concatenate(predicts, axis=0)
+    compressed_embeddings = np.concatenate([np.concatenate(predicts[i], axis=0) for i in len(predicts)], axis=0)
 
     return compressed_embeddings
 
@@ -121,37 +103,28 @@ if __name__ == "__main__":
     user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy()
     item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy()
 
-    if SPLIT is None:
-
-        train_data_og = pd.read_csv(f"compressor_data/{DATASET}/_train_{ORIGIN_DIM}.csv")
-        test_data_og = pd.read_csv(f"compressor_data/{DATASET}/_test_{ORIGIN_DIM}.csv")
-
-        train_data_tg = pd.read_csv(f"compressor_data/{DATASET}/_train_{TARGET_DIM}.csv")
-        test_data_tg = pd.read_csv(f"compressor_data/{DATASET}/_test_{TARGET_DIM}.csv")
-
-    else:
-
-        train_data_og = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
-        test_data_og = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
-
-        train_data_tg = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
-        test_data_tg = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
+    train_data = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
+    test_data = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
 
     user_embedding_datamodule = EmbeddingDataModule(
-        user_embeddings, data=[train_data_og, test_data_og], batch_size=2**12, num_workers=4, entity_type="user"
+        user_embeddings, data=[train_data, test_data], batch_size=2**12, num_workers=4, entity_type="user"
     )
-
     item_embedding_datamodule = EmbeddingDataModule(
-        item_embeddings, data=[train_data_og, test_data_og], batch_size=2**12, num_workers=4, entity_type="item"
+        item_embeddings, data=[train_data, test_data], batch_size=2**12, num_workers=4, entity_type="item"
     )
 
     cf_test_data = CompressorTestingCFDataModule(
-        user_embedding_datamodule, item_embedding_datamodule, cf_val_data=test_data_og, batch_size=2**12, num_workers=4
+        dataset=DATASET,
+        split=SPLIT,
+        user_embeddings_datamodule=user_embedding_datamodule,
+        item_embeddings_datamodule=item_embedding_datamodule,
+        cf_val_data=test_data,
+        batch_size=2**12,
+        num_workers=4,
     )
 
     compressed_user_embeddings = train_compressor(
         embeddings=user_embedding_datamodule,
-        target_dim=TARGET_DIM,
         lr=5e-4,
         l2_reg=0,
         cf_model=copy.deepcopy(model_original),
@@ -160,28 +133,29 @@ if __name__ == "__main__":
 
     compressed_item_embeddings = train_compressor(
         embeddings=item_embedding_datamodule,
-        target_dim=TARGET_DIM,
         lr=5e-4,
         l2_reg=0,
         cf_model=copy.deepcopy(model_original),
         cf_val_datamodule=cf_test_data,
     )
 
+    final_val_dataloaders = cf_test_data.val_dataloader("both")
+
     def print_rmse(model):
 
         trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
-        losses = trainer.validate(model, dataloaders=cf_test_data.val_dataloader("both"), verbose=False)
+        losses = trainer.validate(model, dataloaders=final_val_dataloaders, verbose=False)
 
-        print(f"\t All: {losses[0]['val_rmse']:.6f}")
-        print(f"\t U trained, I trained: {losses[0]['val_rmse/dataloader_idx_0']:.6f}")
-        print(f"\t U trained, I untrained: {losses[1]['val_rmse/dataloader_idx_1']:.6f}")
-        print(f"\t U untrained, I trained: {losses[2]['val_rmse/dataloader_idx_2']:.6f}")
-        print(f"\t U untrained, I untrained: {losses[3]['val_rmse/dataloader_idx_3']:.6f}")
+        print(f"\t All:\t\t\t{losses[0]['val_rmse']:.6f}")
+        print(f"\t U trained, I trained:\t{losses[0]['val_rmse/dataloader_idx_0']:.3f}")
+        print(f"\t U trained, I untrained:\t{losses[1]['val_rmse/dataloader_idx_1']:.3f}")
+        print(f"\t U untrained, I trained:\t{losses[2]['val_rmse/dataloader_idx_2']:.3f}")
+        print(f"\t U untrained, I untrained:\t{losses[3]['val_rmse/dataloader_idx_3']:.3f}")
 
-    print(f"Original Embeddings (dim={ORIGIN_DIM})")  # Performances of the original (large) model
+    print(f"\nOriginal Embeddings (dim={ORIGIN_DIM})")  # Performances of the original (large) model
     print_rmse(model_original)
 
-    print(f"Target Embeddings (dim={TARGET_DIM})")  # Performances of the target (small) model
+    print(f"\nTarget Embeddings (dim={TARGET_DIM})")  # Performances of the target (small) model
     print_rmse(model_target)
 
     model_original.user_embedding.weight.data[user_embedding_datamodule.id_order] = torch.tensor(
@@ -191,5 +165,5 @@ if __name__ == "__main__":
         compressed_item_embeddings
     ).to(model_original.device)
 
-    print(f"Compressed Embeddings (dim={TARGET_DIM})")  # Performances of the compressed (large->small) model
+    print(f"\nCompressed Embeddings (dim={TARGET_DIM})")  # Performances of the compressed (large->small) model
     print_rmse(model_original)
