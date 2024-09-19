@@ -1,6 +1,7 @@
 import torch
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
+import os
 
 DATASET_RANGES = {"ml-1m": (0.835, 0.860), "ml-10m": (0.765, 0.790), "ml-25m": (0.740, 0.765)}
 
@@ -107,14 +108,14 @@ class CFValidationCallback(pl.callbacks.Callback):
         plt.plot(
             [i for i in range(50, len(self.state["train_loss"]))],
             self.state["train_loss"][50:],
-            label="Compressor train {self.embeddings_datamodule.entity_type}s",
+            label=f"Compressor train {self.embeddings_datamodule.entity_type}s",
             color="red",
             alpha=0.5,
         )
         plt.plot(
             [i for i in range(50, len(self.state["val_loss"]))],
             self.state["val_loss"][50:],
-            label="Compressor val {self.embeddings_datamodule.entity_type}s",
+            label=f"Compressor val {self.embeddings_datamodule.entity_type}s",
             color="blue",
             alpha=0.5,
         )
@@ -126,6 +127,7 @@ class CFValidationCallback(pl.callbacks.Callback):
         )
         plt.legend(loc="upper right")
         plt.tight_layout()
+        os.makedirs(f"figures/compressor_training/{self.dataset}", exist_ok=True)
         plt.savefig(
             f"figures/compressor_training/{self.dataset}/{self.embeddings_datamodule.entity_type}s_split{self.split}.pdf"
         )

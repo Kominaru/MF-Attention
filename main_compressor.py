@@ -82,7 +82,7 @@ def train_compressor(
     compressor = EmbeddingCompressor.load_from_checkpoint(checkpointer.best_model_path)
 
     predicts = trainer.predict(compressor, dataloaders=embeddings.val_dataloader())
-    compressed_embeddings = np.concatenate([np.concatenate(predicts[i], axis=0) for i in len(predicts)], axis=0)
+    compressed_embeddings = np.concatenate([np.concatenate(p, axis=0) for p in predicts], axis=0)
 
     return compressed_embeddings
 
@@ -146,7 +146,7 @@ if __name__ == "__main__":
         trainer = pl.Trainer(accelerator="auto", enable_progress_bar=False, gpus=1)
         losses = trainer.validate(model, dataloaders=final_val_dataloaders, verbose=False)
 
-        print(f"\t All:\t\t\t{losses[0]['val_rmse']:.6f}")
+        print(f"\t All:\t\t\t\t{losses[0]['val_rmse']:.3f}")
         print(f"\t U trained, I trained:\t{losses[0]['val_rmse/dataloader_idx_0']:.3f}")
         print(f"\t U trained, I untrained:\t{losses[1]['val_rmse/dataloader_idx_1']:.3f}")
         print(f"\t U untrained, I trained:\t{losses[2]['val_rmse/dataloader_idx_2']:.3f}")
