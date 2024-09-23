@@ -8,5 +8,4 @@ __pycache__
 *.zip
 lightning_logs
 data/datasets
-*.txt
 models
