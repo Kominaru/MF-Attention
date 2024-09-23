@@ -1,15 +1,35 @@
-from typing import Literal
-from pytorch_lightning import LightningModule
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from compressor.linked_autoencoder import LinkedAutoencoder
-from compressor.dds import DynamicDataSelectionHard2v2
+
+from compressor import dds, linked_autoencoder
 
 
-class EmbeddingCompressor(LightningModule):
+class EmbeddingCompressor(pl.LightningModule):
+    """
+    Embedding compressor based on Dynamic Data Selection (DDS) and Attention mechanisms.
 
-    def __init__(self, d: int, features_to_select: int, lr: float = 1e-3, l2_reg: float = 0.0):
+    The model is composed by:
+    - Encoder: LinkedAutoencoder
+    - Dynamic Data Selection: DDS
+    - Attention: Self attention
+    - Decoder: LinkedAutoencoder
+
+    The Encoder+DDS produces a mask that can be multiplied to the input embedding (self-attention).
+    This produces a sparse-compressed embedding that is then reconstructed by the Decoder.
+    """
+
+    def __init__(
+        self, d: int, features_to_select: int, lr: float = 1e-3, l2_reg: float = 0.0
+    ):
+        """
+        Args:
+            d (int): Embedding dimension.
+            features_to_select (int): Number of features to select with DDS.
+            lr (float): Learning rate.
+            l2_reg (float): L2 regularization.
+        """
         super().__init__()
 
         self.lr = lr
@@ -17,16 +37,13 @@ class EmbeddingCompressor(LightningModule):
 
         self.d = d
 
-        self.encoder = LinkedAutoencoder(d)
-        self.dynamic_data_selection = DynamicDataSelectionHard2v2(features_to_select)
-
-        self.decoder = LinkedAutoencoder(d)
+        self.encoder = linked_autoencoder.LinkedAutoencoder(d)
+        self.dynamic_data_selection = dds.DynamicDataSelectionHard2v2(
+            features_to_select
+        )
+        self.decoder = linked_autoencoder.LinkedAutoencoder(d)
 
         self.save_hyperparameters()
-
-        self.last_val_loss = float("inf")
-
-        self.val_outputs = []
 
     def _forward(self, x):
         # Make sure the input is a tensor
@@ -57,12 +74,16 @@ class EmbeddingCompressor(LightningModule):
     def training_step(self, batch, batch_idx):
         x = batch
 
-        # Experiment (17/06/24): Add random gaussian noise to the input for regularization
-        # x = x + torch.randn_like(x) * 0.3
-
         x_hat, l2_reg = self._forward(x)
         loss = nn.MSELoss()(x_hat, x) + l2_reg
-        self.log("train_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
+        self.log(
+            "train_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            add_dataloader_idx=False,
+        )
 
         return loss
 
@@ -71,22 +92,25 @@ class EmbeddingCompressor(LightningModule):
         x_hat = self(x)
         loss = nn.MSELoss()(x_hat, x)
 
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=True)
-        self.log("val_loss", loss, on_step=False, on_epoch=True, prog_bar=True, add_dataloader_idx=False)
-
-        if (self.current_epoch < 500 and self.current_epoch % 50 == 0) or (
-            self.current_epoch >= 500 and self.current_epoch % 250 == 0
-        ):
-            self.val_outputs.append(x_hat)
+        self.log(
+            "val_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            add_dataloader_idx=True,
+        )
+        self.log(
+            "val_loss",
+            loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            add_dataloader_idx=False,
+        )
 
     def predict_step(self, batch, batch_idx, dataloader_idx=None):
-        x = batch
-        x_hat = self(x)
-
-        return x_hat
-
-    def on_validation_epoch_end(self):
-        self.last_val_loss = self.trainer.callback_metrics["val_loss"].item()
+        return self(batch)
 
     def configure_optimizers(self):
         optimizer = optim.AdamW(self.parameters(), lr=self.lr)
