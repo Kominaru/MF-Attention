@@ -142,7 +142,6 @@ class DyadicRegressionDataModule(LightningDataModule):
         data_dir : str = "data/datasets",
         batch_size=64,
         num_workers=4,
-        test_size=0.1,
         verbose=False,
     ):
         """
@@ -154,17 +153,15 @@ class DyadicRegressionDataModule(LightningDataModule):
             data_dir (str): Directory where the dataset is stored
             batch_size (int): Batch size
             num_workers (int): Number of workers for the DataLoader
-            test_size (float): Fraction of the dataset to be used as test set
             verbose (bool): If True, prints basic dataset statistics
         """
         super().__init__()
         self.data_dir = data_dir 
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.test_size = test_size
 
-        self.train_df = pd.read_csv(f"data/{dataset_name}/splits/train_{split}.csv")
-        self.test_df = pd.read_csv(f"data/{dataset_name}/splits/test_{split}.csv")
+        self.train_df = pd.read_csv(f"{data_dir}/{dataset_name}/splits/train_{split}.csv")
+        self.test_df = pd.read_csv(f"{data_dir}/{dataset_name}/splits/test_{split}.csv")
         self.data = pd.concat([self.train_df, self.test_df])
 
         self.num_users = self.data["user_id"].max() + 1 # ID of the last user + 1 (there may be missing IDs, but we assume they are continuous)
@@ -225,7 +222,7 @@ class EmbeddingDataModule(LightningDataModule):
     def __init__(
         self,
         embeddings: np.ndarray,
-        data: Union[pd.DataFrame, list[pd.DataFrame]],
+        data: pd.DataFrame,
         entity_type: Literal["user", "item"],
         batch_size: int = 2**10,
         num_workers: int = 0,
@@ -320,8 +317,6 @@ class CompressorTestingCFDataModule(LightningDataModule):
 
     def __init__(
         self,
-        dataset: str,
-        split: int,
         user_embeddings_datamodule: EmbeddingDataModule,
         item_embeddings_datamodule: EmbeddingDataModule,
         cf_val_data: pd.DataFrame,
@@ -330,8 +325,6 @@ class CompressorTestingCFDataModule(LightningDataModule):
     ):
         """
         Args:
-            dataset (str): Dataset name
-            split (int): Split number
             user_embeddings_datamodule (EmbeddingDataModule): User Embeddings in the CF task
             item_embeddings_datamodule (EmbeddingDataModule): Item Embeddings in the CF task
             cf_val_data (pd.DataFrame): Validation partition in the CF task
@@ -340,8 +333,6 @@ class CompressorTestingCFDataModule(LightningDataModule):
         """
         super().__init__()
 
-        self.dataset = dataset
-        self.split = split
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.val_data = cf_val_data

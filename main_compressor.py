@@ -10,7 +10,7 @@ import pytorch_lightning as pl
 from compressor.embedding_compressor import EmbeddingCompressor
 from compressor.cf_validation_callback import CFValidationCallback
 from mf.collaborativefiltering_mf import CollaborativeFilteringModel
-from data.dataset import EmbeddingDataModule, CompressorTestingCFDataModule
+from data.dataset import EmbeddingDataModule, CompressorTestingCFDataModule, DyadicRegressionDataModule
 
 logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
 logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
@@ -18,7 +18,7 @@ logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING
 ORIGIN_DIM = 512
 TARGET_DIM = 32
 DATASET = "ml-25m"
-SPLIT = 5 #
+SPLIT = 5
 DO_EARLY_STOPPING = False
 TRAINING_TIME = "00:00:15:00"  # "DD:HH:MM:SS"
 
@@ -100,22 +100,24 @@ if __name__ == "__main__":
     user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy()
     item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy()
 
-    train_data = pd.read_csv(f"data/datasets/{DATASET}/splits/train_{SPLIT}.csv")
-    test_data = pd.read_csv(f"data/datasets/{DATASET}/splits/test_{SPLIT}.csv")
-
+    cf_datamodule = DyadicRegressionDataModule(
+        dataset=DATASET,
+        split=SPLIT,
+        batch_size=2**12,
+        num_workers=4,
+    )
+    
     user_embedding_datamodule = EmbeddingDataModule(
-        user_embeddings, data=[train_data, test_data], batch_size=2**12, num_workers=4, entity_type="user"
+        user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy(), data=cf_datamodule.data, batch_size=2**12, num_workers=4, entity_type="user"
     )
     item_embedding_datamodule = EmbeddingDataModule(
-        item_embeddings, data=[train_data, test_data], batch_size=2**12, num_workers=4, entity_type="item"
+        item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy(), data=cf_datamodule.data, batch_size=2**12, num_workers=4, entity_type="item"
     )
 
     cf_test_data = CompressorTestingCFDataModule(
-        dataset=DATASET,
-        split=SPLIT,
         user_embeddings_datamodule=user_embedding_datamodule,
         item_embeddings_datamodule=item_embedding_datamodule,
-        cf_val_data=test_data,
+        cf_val_data=cf_datamodule.test_df,
         batch_size=2**12,
         num_workers=4,
     )
