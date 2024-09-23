@@ -7,6 +7,6 @@ __pycache__
 .neptune
 *.zip
 lightning_logs
-data
+data/datasets
 *.txt
 models

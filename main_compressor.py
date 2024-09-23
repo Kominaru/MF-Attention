@@ -10,7 +10,7 @@ import pytorch_lightning as pl
 from compressor.embedding_compressor import EmbeddingCompressor
 from compressor.cf_validation_callback import CFValidationCallback
 from mf.collaborativefiltering_mf import CollaborativeFilteringModel
-from dataset import EmbeddingDataModule, CompressorTestingCFDataModule
+from data.dataset import EmbeddingDataModule, CompressorTestingCFDataModule
 
 logging.getLogger("pytorch_lightning.utilities.distributed").setLevel(logging.WARNING)
 logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING)
@@ -18,7 +18,7 @@ logging.getLogger("pytorch_lightning.accelerators.gpu").setLevel(logging.WARNING
 ORIGIN_DIM = 512
 TARGET_DIM = 32
 DATASET = "ml-25m"
-SPLIT = 5
+SPLIT = 5 #
 DO_EARLY_STOPPING = False
 TRAINING_TIME = "00:00:15:00"  # "DD:HH:MM:SS"
 
@@ -34,9 +34,6 @@ def train_compressor(
     print(f"Training {embeddings.entity_type} compressor... (lr {lr} | l2_reg {l2_reg})")
 
     compressor = EmbeddingCompressor(embeddings.num_features, TARGET_DIM, lr=lr, l2_reg=l2_reg)
-
-    # Split the CF validation data into reviews from users that will be used to train the compressor
-    # and reviews from users that will not be used to train the compressor
 
     callbacks = []
 
@@ -103,8 +100,8 @@ if __name__ == "__main__":
     user_embeddings = model_original.user_embedding.weight.detach().cpu().numpy()
     item_embeddings = model_original.item_embedding.weight.detach().cpu().numpy()
 
-    train_data = pd.read_csv(f"data/{DATASET}/splits/train_{SPLIT}.csv")
-    test_data = pd.read_csv(f"data/{DATASET}/splits/test_{SPLIT}.csv")
+    train_data = pd.read_csv(f"data/datasets/{DATASET}/splits/train_{SPLIT}.csv")
+    test_data = pd.read_csv(f"data/datasets/{DATASET}/splits/test_{SPLIT}.csv")
 
     user_embedding_datamodule = EmbeddingDataModule(
         user_embeddings, data=[train_data, test_data], batch_size=2**12, num_workers=4, entity_type="user"

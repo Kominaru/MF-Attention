@@ -5,7 +5,7 @@ from os import path
 from bayes_opt import BayesianOptimization
 import torch
 from mf.collaborativefiltering_mf import CollaborativeFilteringModel
-from dataset import DyadicRegressionDataModule
+from data.dataset import DyadicRegressionDataModule
 from argparse import ArgumentParser
 
 import logging

@@ -5,29 +5,23 @@ from torch.utils.data import Dataset, DataLoader
 from pytorch_lightning import LightningDataModule
 import torch
 
-from data.data_utils import load_and_format_tripadvisor_data
-from data.data_utils import load_and_format_movielens_data
-from data.download_data import load_and_format_doubanmonti_data
-from data.download_data import load_and_format_netflixprize_data
-
-
 class FastTensorDataLoader:
     """
-    A DataLoader-like object for a set of tensors that can be much faster than
-    TensorDataset + DataLoader because dataloader grabs individual indices of
-    the dataset and calls cat (slow).
+    DataLoader-like object for a set of tensors that outspeeds
+    TensorDataset + DataLoader the latter grabs individual slices and concatenates them.
     """
 
-    def __init__(self, *tensors, batch_size=32, shuffle=False):
+    def __init__(self, *tensors: torch.Tensor, batch_size: int, shuffle: bool = False):
         """
         Initialize a FastTensorDataLoader.
 
-        :param *tensors: tensors to store. Must have the same length @ dim 0.
-        :param batch_size: batch size to load.
-        :param shuffle: if True, shuffle the data *in-place* whenever an
-            iterator is created out of this object.
+        Args:
+            tensors (tuple of torch.Tensor): tensors to be loaded
+            batch_size (int): batch size
+            shuffle (bool): if True, shuffle data in-place when an iterator is created.
 
-        :returns: A FastTensorDataLoader.
+        Returns:
+            FastTensorDataLoader: DataLoader-like object
         """
         assert all(t.shape[0] == tensors[0].shape[0] for t in tensors)
         self.tensors = tensors
@@ -71,37 +65,30 @@ class FastTensorDataLoader:
 
 class DyadicRegressionDataset(Dataset):
     """
-    Represents a dataset for regression over dyadic data.
+    Dataset for regression tasks on dyadic data (e.g., Collaborative Filtering).
+
+    Attributes:
+        data (pd.DataFrame): DataFrame containing the dataset with columns ['user_id', 'item_id', 'rating']
+
     """
 
     def __init__(self, df):
         """
         Args:
-            df (pandas.DataFrame): DataFrame containing the dataset
-                Must contain at least the columns ['user_id', 'item_id', 'rating']
+            df (pd.DataFrame): DataFrame containing the dataset
+                Must contain the columns ['user_id', 'item_id', 'rating']
         """
 
         self.data = df
         self.data["user_id"] = self.data["user_id"].astype(np.int64)
         self.data["item_id"] = self.data["item_id"].astype(np.int64)
         self.data["rating"] = self.data["rating"].astype(np.float32)
+        self.data = self.data[["user_id", "item_id", "rating"]]
 
     def __len__(self):
-        """
-        Returns:
-            int: Length of the dataset
-        """
         return len(self.data)
 
     def __getitem__(self, idx):
-        """
-        Args:
-            idx (int): Index
-
-        Returns:
-            tuple: Tuple containing the user_id, item_id and rating
-        """
-
         user_id = self.data.at[idx, "user_id"]
         item_id = self.data.at[idx, "item_id"]
         rating = self.data.at[idx, "rating"]
@@ -111,90 +98,76 @@ class DyadicRegressionDataset(Dataset):
 
 class EmbeddingDataset(Dataset):
     """
-    Dataset for embedding compression and reconstruction.
+    Dataset for embedding compression tasks
     """
 
-    def __init__(self, embeddings, ids):
+    def __init__(self, embeddings: np.ndarray, ids: np.ndarray = None):
         """
         Args:
             embeddings (np.ndarray): Embeddings to be compressed
+            ids (np.ndarray): Actual IDs of the embeddings. If None, IDs are assumed to be the indices of the embeddings.
         """
 
         self.embeddings = embeddings
-        self.ids = ids
+        self.ids = ids if ids is not None else np.arange(len(embeddings))
 
     def __len__(self):
-        """
-        Returns:
-            int: Length of the dataset
-        """
         return len(self.embeddings)
 
     def __getitem__(self, idx):
-        """
-        Args:
-            idx (int): Index
-
-        Returns:
-            np.ndarray: Embedding
-        """
         return self.embeddings[idx]
 
 
 class DyadicRegressionDataModule(LightningDataModule):
+    """
+    DataModule for Dyadic Regression tasks (e.g., Collaborative Filtering).
+
+    Attributes:
+        data_dir (str): Directory where the dataset is stored
+        train_df (pd.DataFrame): Training dataset
+        test_df (pd.DataFrame): Test dataset
+        data (pd.DataFrame): Full dataset
+        num_users (int): Number of users (ID of the last user + 1)
+        num_items (int): Number of items (ID of the last item + 1)
+        mean_rating (float): Mean rating
+        min_rating (float): Minimum rating
+        max_rating (float): Maximum rating
+        train_dataset (DyadicRegressionDataset): Training dataset
+        test_dataset (DyadicRegressionDataset): Test dataset
+    """
     def __init__(
         self,
-        data_dir,
+        dataset_name : str,
+        split: int,
+        data_dir : str = "data/datasets",
         batch_size=64,
-        num_workers=0,
+        num_workers=4,
         test_size=0.1,
-        dataset_name="ml-1m",
-        split: int = None,
         verbose=False,
     ):
         """
-        Creates a dyadic regression datamodule with a holdout train-test split.
-        Downloads the dataset if it doesn't exist in the data directory.
+        Creates a DyadicRegressionDataModule.
 
         Args:
+            dataset_name (str): Name of the dataset (e.g. "ml-100k")
+            split (int): Number of the split to be used
             data_dir (str): Directory where the dataset is stored
             batch_size (int): Batch size
             num_workers (int): Number of workers for the DataLoader
             test_size (float): Fraction of the dataset to be used as test set
+            verbose (bool): If True, prints basic dataset statistics
         """
         super().__init__()
-        self.data_dir = data_dir
+        self.data_dir = data_dir 
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.test_size = test_size
 
-        if split is None:
-            # Load the dataset from the file
-            if dataset_name.startswith("ml-"):
-                self.data = load_and_format_movielens_data(dataset_name)
-            elif dataset_name.startswith("tripadvisor-"):
-                self.data = load_and_format_tripadvisor_data(dataset_name)
-            elif dataset_name == "netflix-prize":
-                self.data = load_and_format_netflixprize_data(dataset_name)
-            elif dataset_name == "douban-monti":
-                self.data, self.train_df, self.test_df = load_and_format_doubanmonti_data(dataset_name)
+        self.train_df = pd.read_csv(f"data/{dataset_name}/splits/train_{split}.csv")
+        self.test_df = pd.read_csv(f"data/{dataset_name}/splits/test_{split}.csv")
+        self.data = pd.concat([self.train_df, self.test_df])
 
-            if dataset_name != "douban-monti":
-                # Split the df into train and test sets (pandas dataframe)
-
-                msk = np.random.rand(len(self.data)) < (1 - self.test_size)
-
-                self.train_df = self.data[msk]
-                self.test_df = self.data[~msk]
-
-        else:
-            # print(f"Using pre-split data for split {split}")
-            self.train_df = pd.read_csv(f"data/{dataset_name}/splits/train_{split}.csv")
-            self.test_df = pd.read_csv(f"data/{dataset_name}/splits/test_{split}.csv")
-            self.data = pd.concat([self.train_df, self.test_df])
-
-        # Calculate the number of users and items in the dataset
-        self.num_users = self.data["user_id"].max() + 1
+        self.num_users = self.data["user_id"].max() + 1 # ID of the last user + 1 (there may be missing IDs, but we assume they are continuous)
         self.num_items = self.data["item_id"].max() + 1
         self.mean_rating = self.data["rating"].mean()
 
@@ -203,8 +176,8 @@ class DyadicRegressionDataModule(LightningDataModule):
         self.max_rating = self.data["rating"].max()
 
         if verbose:
-            print(f"#Users: {self.num_users} (max id {self.data['user_id'].max()})")
-            print(f"#Items: {self.num_items} (max id {self.data['item_id'].max()})")
+            print(f"#Users: {self.data["user_id"].nunique()} (max id {self.data['user_id'].max()})")
+            print(f"#Items: {self.data["item_id"].nunique()} (max id {self.data['item_id'].max()})")
             print(f"Mean rating: {self.mean_rating:.3f}")
             print(f"Min rating: {self.min_rating:.3f}")
             print(f"Max rating: {self.max_rating:.3f}")
@@ -216,7 +189,6 @@ class DyadicRegressionDataModule(LightningDataModule):
         self.test_dataset = DyadicRegressionDataset(self.test_df)
 
     def train_dataloader(self):
-
         return FastTensorDataLoader(
             torch.tensor(self.train_df["user_id"].values),
             torch.tensor(self.train_df["item_id"].values),
@@ -235,7 +207,7 @@ class DyadicRegressionDataModule(LightningDataModule):
         )
 
     def test_dataloader(self):
-        return DataLoader(
+        return DataLoader( # We use Dataloader as trainer.predict() does not support FastTensorDataLoader
             self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers, persistent_workers=True
         )
 
@@ -244,8 +216,6 @@ class EmbeddingDataModule(LightningDataModule):
     """
     Attributes:
             embeddings (np.ndarray): Embeddings to be compressed
-            batch_size (int): Batch size
-            num_workers (int): Number of workers for the DataLoader
             entity_type (Literal["user", "item"]): Type of entity ("user" or "item")
             dataset_train (EmbeddingDataset): Training dataset
             dataset_val (EmbeddingDataset): Validation dataset
@@ -254,12 +224,13 @@ class EmbeddingDataModule(LightningDataModule):
 
     def __init__(
         self,
-        embeddings: np.ndarray = None,
-        data: Union[pd.DataFrame, list[pd.DataFrame]] = None,
+        embeddings: np.ndarray,
+        data: Union[pd.DataFrame, list[pd.DataFrame]],
+        entity_type: Literal["user", "item"],
         batch_size: int = 2**10,
         num_workers: int = 0,
-        entity_type: Literal["user", "item"] = "user",
         val_percent: float = 0.1,
+       
     ):
         """
         Creates a datamodule for embedding compression and reconstruction.
@@ -267,10 +238,10 @@ class EmbeddingDataModule(LightningDataModule):
         Args:
             embeddings (np.ndarray): Embeddings to be compressed
             data (Union[pd.DataFrame, List[pd.DataFrame]]): Dataframe(s) containing the dataset reviews
-            batch_size (int): Batch size
-            num_workers (int): Number of workers for the DataLoader
             entity_type (str): Type of entity (e.g., "user", "item")
-            val_percent (float): Percentage of embeddings to be used for validation
+            batch_size (int): Batch size.
+            num_workers (int): Number of workers for the DataLoader.
+            val_percent (float): Percentage of embeddings to be used for validation.
         """
         super().__init__()
         self.embeddings = embeddings
@@ -286,7 +257,7 @@ class EmbeddingDataModule(LightningDataModule):
         np.random.shuffle(unique_ids)
 
         self.embeddings = self.embeddings[unique_ids]  # Randomize the embedding order and select only
-        self.id_order = unique_ids  # the embeddings for the unique IDs found in the data
+        self.id_order = unique_ids                     # the embeddings for the unique IDs found in the data
 
         num_train = len(unique_ids) - int(len(unique_ids) * val_percent)
 
@@ -298,10 +269,6 @@ class EmbeddingDataModule(LightningDataModule):
         print(f"  Validation {entity_type}s:\t{len(unique_ids) - num_train}\n")
 
     def train_dataloader(self):
-        """
-        Returns:
-            torch.utils.data.DataLoader: Training DataLoader
-        """
         return DataLoader(
             self.dataset_train,
             batch_size=self.batch_size,
@@ -311,11 +278,6 @@ class EmbeddingDataModule(LightningDataModule):
         )
 
     def val_dataloader(self):
-        """
-        Returns:
-            torch.utils.data.DataLoader: Validation DataLoader. Returns two dataloaders if the dataset is split into train and val.
-        """
-
         dataloader_train = DataLoader(
             self.dataset_train,
             batch_size=self.batch_size,
@@ -344,6 +306,16 @@ class CompressorTestingCFDataModule(LightningDataModule):
 
     Splits the CF validation data into reviews from users/items that will be used to train the compressor
     and reviews from users/items that will not be used to train the compressor.
+
+    Attributes:
+        user_embeddings_datamodule (EmbeddingDataModule): User Embeddings in the CF task
+        item_embeddings_datamodule (EmbeddingDataModule): Item Embeddings in the CF task
+        cf_val_data (pd.DataFrame): Complete Validation partition in the CF task
+
+        df_user_t (pd.DataFrame): Reviews from users used in compressor training
+        df_user_v (pd.DataFrame): Reviews from users not used in compressor training
+        df_item_t (pd.DataFrame): Reviews from items used in compressor training
+        df_item_v (pd.DataFrame): Reviews from items not used in compressor training
     """
 
     def __init__(
@@ -414,36 +386,21 @@ class CompressorTestingCFDataModule(LightningDataModule):
                     4. Reviews whose users and items are not used in compressor training
         """
 
-        if entity_type == "user":
+        if entity_type in ["user", "item"]:
             return DataLoader(
-                DyadicRegressionDataset(self.df_user_t),
+                DyadicRegressionDataset(self.df_user_t if entity_type == "user" else self.df_item_t),
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 persistent_workers=True,
                 shuffle=False,
             ), DataLoader(
-                DyadicRegressionDataset(self.df_user_v),
-                batch_size=self.batch_size,
-                num_workers=self.num_workers,
-                persistent_workers=True,
-                shuffle=False,
-            )
-        elif entity_type == "item":
-            return DataLoader(
-                DyadicRegressionDataset(self.df_item_t),
-                batch_size=self.batch_size,
-                num_workers=self.num_workers,
-                persistent_workers=True,
-                shuffle=False,
-            ), DataLoader(
-                DyadicRegressionDataset(self.df_item_v),
+                DyadicRegressionDataset(self.df_user_v if entity_type == "user" else self.df_item_v),
                 batch_size=self.batch_size,
                 num_workers=self.num_workers,
                 persistent_workers=True,
                 shuffle=False,
             )
         else:
-            # Find the intersection of the users and items in the train and val datasets
             df_both_t = self.df_user_t[self.df_user_t["item_id"].isin(self.df_item_t["item_id"])].reset_index(
                 drop=True
             )
