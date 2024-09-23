@@ -5,7 +5,7 @@ This project contains Work in Progress utilities for utilizing attention-based m
 The objective of using this method is two-fold:
 - Using DDS-based attention allows the compression mechanism to be aware of user characteristics before compression
 - Create a reusable compressor: not only it can be used to compress and decompress the embeddings of the entities it was trained with, but also of new embeddings trained by the same overarching RS system (e.g. when new users or clients are added to the system).
-- Is not affected by popularity/representation bias of the overarching MF data or model (as the compressor is trained on embedding reconstruction, rather than the MF task data itself)
+- Is not affected by popularity/representation bias of the overarching MF data or model (as the compressor is trained on embedding reconstruction, rather than the MF task data itself).
 
 
 > [!CAUTION]
